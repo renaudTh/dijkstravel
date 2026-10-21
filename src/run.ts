@@ -1,6 +1,7 @@
 import type { BBox, LonLat } from './geo.ts';
 import { isFiniteNumber, isLonLatArray, isNonEmptyString, isRecord } from './narrow.ts';
 import type { Result } from './result.ts';
+import { isThemeName } from './theme.ts';
 
 export const VIDEO_SIZES = {
   '16:9': { width: 1920, height: 1080 },
@@ -142,4 +143,22 @@ function parseVideo(raw: unknown, issues: RunIssue[]): VideoSettings | null {
 export function runPaths(run: Pick<Run, 'name'>): RunPaths {
   const dir = `data/${run.name}`;
   return { dir, places: `${dir}/places.geojson`, tour: `${dir}/tour.json`, video: `${dir}/video.mp4` };
+}
+
+/** Thème d'un run (`"theme": "prune"` → `themes/prune.json`), `default` s'il n'en déclare pas ; `null` si le nom est invalide. */
+export function runThemeName(raw: unknown): string | null {
+  const name = isRecord(raw) ? raw['theme'] : undefined;
+  if (name === undefined) return 'default';
+  return typeof name === 'string' && isThemeName(name) ? name : null;
+}
+
+export const PROFILES = ['car', 'foot'] as const;
+
+export type Profile = (typeof PROFILES)[number];
+
+/** Profil de routage d'un run (`"profile": "foot"`), `car` s'il n'en déclare pas ; `null` s'il est inconnu. */
+export function runProfile(raw: unknown): Profile | null {
+  const profile = isRecord(raw) ? raw['profile'] : undefined;
+  if (profile === undefined) return 'car';
+  return PROFILES.find((known) => known === profile) ?? null;
 }

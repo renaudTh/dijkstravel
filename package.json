@@ -13,7 +13,8 @@
     "solve": "node src/cli/solve.ts",
     "render": "node src/cli/render.ts",
     "source:csv": "node sources/csv.ts",
-    "source:overpass": "node sources/overpass.ts"
+    "source:overpass": "node sources/overpass.ts",
+    "editor": "node src/cli/editor.ts"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

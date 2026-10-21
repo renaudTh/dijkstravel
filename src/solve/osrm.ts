@@ -31,6 +31,7 @@ async function getOsrm(url: string): Promise<Readonly<Record<string, unknown>>> 
   return raw;
 }
 
+// Le profil de l'URL (`driving`) est ignoré par osrm-routed : il sert le profil de ses données (car, foot…).
 export async function fetchDistanceMatrix(osrmUrl: string, locations: readonly LonLat[]): Promise<DistanceMatrix> {
   // ponytail: toutes les coordonnées dans l'URL ; découper en blocs sources/destinations si osrm-routed refuse.
   const raw = await getOsrm(`${osrmUrl}/table/v1/driving/${coordinatesPath(locations)}?annotations=distance`);

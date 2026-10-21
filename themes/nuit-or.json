@@ -1,0 +1,43 @@
+{
+  "route": {
+    "color": "#c9a227",
+    "coreColor": "#fff1b8",
+    "width": 14,
+    "coreRatio": 0.4,
+    "coreBlurRatio": 0.6
+  },
+  "stops": {
+    "unvisitedColor": "#8fa8d8",
+    "unvisitedRadius": 3.5,
+    "visitedRatio": 0.8,
+    "popRadius": 16
+  },
+  "basemap": {
+    "imagery": "ign",
+    "brightness": 0,
+    "contrast": 0.15,
+    "saturation": 0,
+    "hillshade": 0,
+    "borders": false,
+    "borderColor": "#ffffff",
+    "tintColor": "#0a1633",
+    "tintOpacity": 0
+  },
+  "hud": {
+    "font": "Poppins",
+    "size": 54,
+    "background": "#0a1633",
+    "textColor": "#e8ecf7",
+    "titleColor": "#c9a227",
+    "distanceColor": "#f2c75c",
+    "pillFrom": "#13254d",
+    "pillTo": "#13254d",
+    "pillTextColor": "#f2c75c",
+    "showTitle": true,
+    "showCount": true,
+    "showLastStop": true
+  },
+  "camera": {
+    "followFraction": 0.25
+  }
+}

@@ -4,7 +4,7 @@ import { captureVideo } from '../render/capture.ts';
 import { servePage } from '../render/server.ts';
 import { runPaths, VIDEO_SIZES } from '../run.ts';
 import { parseTour } from '../solve/tour.ts';
-import { loadRun, usage } from './shared.ts';
+import { loadRun, loadThemeFile, usage } from './shared.ts';
 
 /**
  * `node src/cli/render.ts <run.json>` → `data/<run>/video.mp4`, à partir du seul `tour.json`.
@@ -23,11 +23,12 @@ export async function main(argv: readonly string[]): Promise<number> {
     return usage('render <run.json> [--preview] [--seconds=<n>] [--workers=<n>]');
   }
   const run = await loadRun(runFile);
-  if (run === null) return 1;
+  const theme = await loadThemeFile(runFile);
+  if (run === null || theme === null) return 1;
   const paths = runPaths(run);
   // Lu ici pour échouer tôt ; la page relit le même fichier.
   parseTour(await readJson(paths.tour));
-  const server = await servePage({ run: runFile, tour: paths.tour });
+  const server = await servePage({ run: runFile, tour: paths.tour, theme, editable: false });
   if (argv.includes('--preview')) {
     console.log(`${server.url}?frame=0  (Ctrl+C pour arrêter)`);
     return 0;

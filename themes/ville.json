@@ -1,0 +1,5 @@
+{
+  "basemap": { "imagery": "ign", "brightness": 0, "contrast": 0.1, "saturation": 0, "hillshade": 0, "borders": false },
+  "route": { "width": 12 },
+  "camera": { "followFraction": 0.25 }
+}

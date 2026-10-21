@@ -9,12 +9,26 @@
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=block" rel="stylesheet" />
+    <!-- Les polices proposées par l'éditeur (HUD_FONTS dans src/theme.ts). -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito:wght@700..900&family=Quicksand:wght@700&family=Fredoka:wght@700&family=Baloo+2:wght@700..800&family=Poppins:wght@700;800;900&family=Comfortaa:wght@700&display=block"
+      rel="stylesheet"
+    />
     <style>
+      /* Valeurs par défaut ; le thème (src/theme.ts) les remplace au chargement. */
       :root {
-        --plum: #702963;
-        --pink: #e0679f;
-        --pink-light: #f5a3c7;
+        --hud-font: 'Nunito';
+        --hud-size: 30px;
+        --hud-bg: #260c28;
+        --hud-text: #ffffff;
+        --hud-title: #f5a3c7;
+        --hud-distance: #e0679f;
+        --pill-from: #702963;
+        --pill-to: #e0679f;
+        --pill-text: #ffffff;
+      }
+      .off {
+        display: none !important;
       }
       html,
       body,
@@ -23,27 +37,26 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        font-family: 'Nunito', sans-serif;
+        font-family: var(--hud-font), sans-serif;
       }
       #hud {
         position: absolute;
         top: 3%;
+        right: 3%;
         left: 3%;
         display: flex;
         flex-direction: column;
         gap: 0.35em;
-        width: fit-content;
-        max-width: 80vw;
         padding: 0.6em 0.8em;
         border-radius: 0.8em;
-        background: rgb(38 12 40 / 72%);
+        background: color-mix(in srgb, var(--hud-bg) 72%, transparent);
         backdrop-filter: blur(6px);
-        color: #fff;
-        font-size: clamp(14px, 1.5vmax, 28px);
+        color: var(--hud-text);
+        font-size: var(--hud-size);
         font-weight: 800;
       }
       #title {
-        color: var(--pink-light);
+        color: var(--hud-title);
         font-size: 0.6em;
         font-weight: 700;
         letter-spacing: 0.08em;
@@ -55,7 +68,7 @@
         gap: 0.8em;
       }
       #distance {
-        color: var(--pink);
+        color: var(--hud-distance);
         font-size: 1.5em;
         font-weight: 900;
       }
@@ -64,15 +77,24 @@
         font-size: 0.8em;
         opacity: 0.85;
       }
+      /* Une seule ligne, quelle que soit la longueur du nom : la carte garde sa hauteur
+         (page.ts réduit la police des noms trop longs pour qu'ils tiennent). */
       #last-stop {
+        box-sizing: border-box;
         width: fit-content;
+        max-width: 100%;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
         padding: 0.2em 0.7em;
         border-radius: 999px;
-        background: linear-gradient(90deg, var(--plum), var(--pink));
+        background: linear-gradient(90deg, var(--pill-from), var(--pill-to));
+        color: var(--pill-text);
       }
+      /* Masqués sans être retirés : la carte garde la même taille pendant l'intro. */
       body[data-phase='intro'] #stats,
       body[data-phase='intro'] #last-stop {
-        display: none;
+        visibility: hidden;
       }
       #attribution {
         position: absolute;
@@ -87,8 +109,8 @@
       @media (orientation: portrait) {
         #hud {
           top: 9%;
+          right: 5%;
           left: 5%;
-          font-size: 30px;
         }
       }
     </style>
@@ -101,10 +123,11 @@
         <div id="counter"><span id="distance"></span> <span id="total-distance"></span></div>
         <div id="count"></div>
       </div>
-      <div id="last-stop" hidden></div>
+      <div id="last-stop"></div>
     </div>
     <div id="attribution">
-      © OpenStreetMap contributors · © OpenMapTiles · OpenFreeMap · NASA Blue Marble · Mapzen Terrain Tiles
+      © OpenStreetMap contributors · © OpenMapTiles · OpenFreeMap · <span id="imagery-credit"></span> · Mapzen Terrain
+      Tiles
     </div>
     <script type="module" src="/src/render/page.ts"></script>
   </body>

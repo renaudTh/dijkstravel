@@ -28,8 +28,6 @@ export type Camera = {
 };
 
 const SMOOTHING_SAMPLES = 21;
-/** Pendant le parcours, l'écran couvre ce fragment de l'emprise totale : l'échelle d'une région pour la France. */
-const FOLLOW_FRACTION = 1 / 8;
 // ponytail: zoom calculé pour un écran de 1080 px de petit côté, vrai pour les deux formats de VIDEO_SIZES.
 const SCREEN_PIXELS = 1080;
 const WORLD_METERS = 40_075_016;
@@ -71,21 +69,26 @@ export function hudAt(tour: Tour, meters: number): Hud {
   };
 }
 
-export function cameraAt(tour: Tour, moment: Moment): Camera {
+/** `followFraction` : part de l'emprise totale visible pendant le parcours (l'échelle d'une région pour la France). */
+export function cameraAt(tour: Tour, moment: Moment, followFraction: number): Camera {
   switch (moment.phase) {
     case 'intro':
-      return blend(overview(tour), travelCamera(tour, 0), smoothstep(moment.progress));
+      return blend(overview(tour), travelCamera(tour, 0, followFraction), smoothstep(moment.progress));
     case 'travel':
-      return travelCamera(tour, moment.meters);
+      return travelCamera(tour, moment.meters, followFraction);
     case 'outro':
-      return blend(travelCamera(tour, totalMeters(tour.path)), overview(tour), smoothstep(moment.progress));
+      return blend(
+        travelCamera(tour, totalMeters(tour.path), followFraction),
+        overview(tour),
+        smoothstep(moment.progress),
+      );
   }
 }
 
 /** Nord en haut, à plat ; le centre suit une moyenne glissante du tracé, pas la tête elle-même. */
-function travelCamera(tour: Tour, meters: number): Camera {
+function travelCamera(tour: Tour, meters: number, followFraction: number): Camera {
   const whole = overview(tour);
-  const zoom = clamp(whole.zoom + Math.log2(1 / FOLLOW_FRACTION), 4, 13);
+  const zoom = clamp(whole.zoom + Math.log2(1 / followFraction), 4, 16);
   const visibleMeters = (WORLD_METERS * Math.cos(toRadians(whole.center[1])) * SCREEN_PIXELS) / (512 * 2 ** zoom);
   const window = visibleMeters * 0.5;
   const samples = Array.from({ length: SMOOTHING_SAMPLES }, (_, i) =>
@@ -109,7 +112,7 @@ function overview(tour: Tour): Camera {
   const span = Math.max(east - west, north - south, 0.01);
   const camera: Camera = {
     center: [(west + east) / 2, inverseMercatorDegrees((south + north) / 2)],
-    zoom: clamp(Math.log2((SCREEN_PIXELS * 0.8 * 360) / (512 * span)), 1, 13),
+    zoom: clamp(Math.log2((SCREEN_PIXELS * 0.8 * 360) / (512 * span)), 1, 16),
     pitch: 0,
     bearing: 0,
   };

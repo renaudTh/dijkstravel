@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Éditeur de thème</title>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #1a0d1c;
+        --panel: #26142a;
+        --line: #3d2442;
+        --text: #f4e9f5;
+        --muted: #b9a3bd;
+        --accent: #e0679f;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          14px/1.4 'Nunito',
+          system-ui,
+          sans-serif;
+      }
+      body {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+      }
+      aside {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-right: 1px solid var(--line);
+        background: var(--panel);
+      }
+      header,
+      footer {
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+      footer {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        border-top: 1px solid var(--line);
+        border-bottom: 0;
+      }
+      h1 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 800;
+      }
+      #theme-name {
+        color: var(--muted);
+      }
+      #controls {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 18px 18px;
+      }
+      fieldset {
+        margin: 14px 0 0;
+        padding: 0;
+        border: 0;
+      }
+      legend {
+        margin-bottom: 6px;
+        color: var(--accent);
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-size: 12px;
+      }
+      label {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 4px 10px;
+        padding: 5px 0;
+      }
+      label input[type='range'] {
+        grid-column: 1 / -1;
+        width: 100%;
+        accent-color: var(--accent);
+      }
+      output {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      input[type='color'] {
+        width: 44px;
+        height: 26px;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: none;
+      }
+      input[type='checkbox'] {
+        accent-color: var(--accent);
+      }
+      select,
+      button {
+        font: inherit;
+        color: var(--text);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 10px;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #1a0d1c;
+        font-weight: 800;
+      }
+      #status {
+        flex-basis: 100%;
+        color: var(--muted);
+        min-height: 1.4em;
+      }
+      main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        padding: 16px;
+        gap: 12px;
+      }
+      #timeline {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      #timeline input {
+        flex: 1;
+        accent-color: var(--accent);
+      }
+      #stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+      /* L'aperçu est la vraie page de rendu, à sa taille vidéo, réduite pour tenir à l'écran. */
+      #preview {
+        position: absolute;
+        top: 0;
+        left: 50%;
+        border: 0;
+        border-radius: 12px;
+        transform-origin: top center;
+        box-shadow: 0 10px 40px rgb(0 0 0 / 50%);
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <header>
+        <h1>Éditeur de thème</h1>
+        <div id="theme-name"></div>
+      </header>
+      <div id="controls"></div>
+      <footer>
+        <button id="save" class="primary" type="button">Enregistrer</button>
+        <button id="reset" type="button">Valeurs par défaut</button>
+        <div id="status" role="status"></div>
+      </footer>
+    </aside>
+    <main>
+      <div id="timeline">
+        <input id="frame" type="range" min="0" value="0" aria-label="Image de la vidéo" />
+        <output id="frame-label"></output>
+      </div>
+      <div id="stage"><iframe id="preview" title="Aperçu du rendu"></iframe></div>
+    </main>
+    <script type="module" src="/src/render/editor.ts"></script>
+  </body>
+</html>

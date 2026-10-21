@@ -17,6 +17,16 @@ services:
       - ./data/osrm:/data
     ports:
       - '5000:5000'
+  # Même chose en profil piéton (osrm-extract -p /opt/foot.lua), pour les runs `"profile": "foot"`.
+  osrm-foot:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    command: >
+      osrm-routed --algorithm mld --max-table-size 10000 --max-viaroute-size 10000
+      /data/${OSRM_FOOT_EXTRACT:-grenoble-foot}.osrm
+    volumes:
+      - ./data/osrm:/data
+    ports:
+      - '5001:5000'
   # VROOM ne reçoit que des matrices (D-4) : il n'appelle jamais OSRM.
   vroom:
     image: ghcr.io/vroom-project/vroom-docker:latest
