@@ -1,0 +1,27 @@
+{
+  "name": "dijkstravel",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "lint": "tsc && eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "test": "node --test \"src/**/*.test.ts\" \"sources/**/*.test.ts\"",
+    "validate": "node src/cli/validate.ts",
+    "solve": "node src/cli/solve.ts",
+    "render": "node src/cli/render.ts",
+    "source:csv": "node sources/csv.ts",
+    "source:overpass": "node sources/overpass.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "eslint": "10.13.0",
+    "maplibre-gl": "6.15.0",
+    "playwright": "1.64.1",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0"
+  }
+}

@@ -1,0 +1,26 @@
+# Préparation OSRM, une fois par extrait (ex. bretagne-latest, france-latest) :
+#   curl -L -o data/osrm/<extrait>.osm.pbf https://download.geofabrik.de/europe/france/<extrait>.osm.pbf
+#   Gros extraits (France) : ne garder que le réseau routier, sinon osrm-extract dépasse 18 Go de RAM.
+#   docker run --rm -v "$PWD/data/osrm:/data" iboates/osmium tags-filter /data/<extrait>.osm.pbf \
+#     w/highway w/route=ferry,shuttle_train r/type=restriction -o /data/<extrait>-routes.osm.pbf
+#   docker run --rm -v "$PWD/data/osrm:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/car.lua /data/<extrait>.osm.pbf
+#   docker run --rm -v "$PWD/data/osrm:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/<extrait>.osrm
+#   docker run --rm -v "$PWD/data/osrm:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/<extrait>.osrm
+# Puis : OSRM_EXTRACT=<extrait> docker compose up -d
+services:
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    command: >
+      osrm-routed --algorithm mld --max-table-size 10000 --max-viaroute-size 10000
+      /data/${OSRM_EXTRACT:-bretagne-latest}.osrm
+    volumes:
+      - ./data/osrm:/data
+    ports:
+      - '5000:5000'
+  # VROOM ne reçoit que des matrices (D-4) : il n'appelle jamais OSRM.
+  vroom:
+    image: ghcr.io/vroom-project/vroom-docker:latest
+    volumes:
+      - ./vroom:/conf
+    ports:
+      - '3000:3000'

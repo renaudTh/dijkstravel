@@ -1,0 +1,10 @@
+{
+  "name": "bretagne-chateaux",
+  "bbox": { "west": -5.25, "south": 47.2, "east": -1.0, "north": 48.95 },
+  "mode": "loop",
+  "video": { "format": "9:16", "durationSec": 33, "introSec": 2, "outroSec": 2 },
+  "overpass": {
+    "areaIso": "FR-BRE",
+    "filter": "[\"historic\"=\"castle\"][\"castle_type\"~\"^(stately|defensive|fortress|castle)$\"]"
+  }
+}

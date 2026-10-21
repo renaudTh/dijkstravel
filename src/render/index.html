@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>dijkstravel</title>
+    <link rel="stylesheet" href="/node_modules/maplibre-gl/dist/maplibre-gl.css" />
+    <script type="importmap">
+      { "imports": { "maplibre-gl": "/node_modules/maplibre-gl/dist/maplibre-gl.mjs" } }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=block" rel="stylesheet" />
+    <style>
+      :root {
+        --plum: #702963;
+        --pink: #e0679f;
+        --pink-light: #f5a3c7;
+      }
+      html,
+      body,
+      #map {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: 'Nunito', sans-serif;
+      }
+      #hud {
+        position: absolute;
+        top: 3%;
+        left: 3%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35em;
+        width: fit-content;
+        max-width: 80vw;
+        padding: 0.6em 0.8em;
+        border-radius: 0.8em;
+        background: rgb(38 12 40 / 72%);
+        backdrop-filter: blur(6px);
+        color: #fff;
+        font-size: clamp(14px, 1.5vmax, 28px);
+        font-weight: 800;
+      }
+      #title {
+        color: var(--pink-light);
+        font-size: 0.6em;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      #stats {
+        display: flex;
+        align-items: baseline;
+        gap: 0.8em;
+      }
+      #distance {
+        color: var(--pink);
+        font-size: 1.5em;
+        font-weight: 900;
+      }
+      #total-distance,
+      #count {
+        font-size: 0.8em;
+        opacity: 0.85;
+      }
+      #last-stop {
+        width: fit-content;
+        padding: 0.2em 0.7em;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--plum), var(--pink));
+      }
+      body[data-phase='intro'] #stats,
+      body[data-phase='intro'] #last-stop {
+        display: none;
+      }
+      #attribution {
+        position: absolute;
+        left: 1.5%;
+        bottom: 1%;
+        color: rgb(255 255 255 / 70%);
+        font-size: 12px;
+        font-weight: 700;
+        text-shadow: 0 0 3px rgb(0 0 0 / 80%);
+      }
+      /* Portrait (Reels, TikTok, Shorts) : sous la bande que couvre l'interface de l'appli en haut. */
+      @media (orientation: portrait) {
+        #hud {
+          top: 9%;
+          left: 5%;
+          font-size: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="hud">
+      <div id="title"></div>
+      <div id="stats">
+        <div id="counter"><span id="distance"></span> <span id="total-distance"></span></div>
+        <div id="count"></div>
+      </div>
+      <div id="last-stop" hidden></div>
+    </div>
+    <div id="attribution">
+      © OpenStreetMap contributors · © OpenMapTiles · OpenFreeMap · NASA Blue Marble · Mapzen Terrain Tiles
+    </div>
+    <script type="module" src="/src/render/page.ts"></script>
+  </body>
+</html>
