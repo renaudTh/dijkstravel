@@ -1,5 +1,5 @@
-// Script jetable : tous les bars et pubs de la commune de Grenoble (code INSEE 38185).
-// `node sources/oneshot/bars-grenoble.ts runs/grenoble-bars.json`
+// Script jetable : tous les bars et pubs d'une commune, désignée par son code INSEE.
+// `node sources/oneshot/bars-commune.ts runs/grenoble-bars.json 38185`  (Lyon : 69123)
 // La source Overpass générique cible une zone ISO (pays, région) : une commune se désigne par son code INSEE.
 import { loadRun } from '../../src/cli/shared.ts';
 import { writeJson } from '../../src/files.ts';
@@ -8,17 +8,19 @@ import { describePlaceIssue, parsePlaces, toPlacesFile, type Place } from '../..
 import { runPaths } from '../../src/run.ts';
 import { fetchOverpass, MERGE_RADIUS_METERS, parseOverpassResponse, placesFromElements } from '../overpass.ts';
 
-const QUERY = `[out:json][timeout:120];
-area["ref:INSEE"="38185"]["admin_level"="8"]->.commune;
+const query = (insee: string): string => `[out:json][timeout:120];
+area["ref:INSEE"="${insee}"]["admin_level"="8"]->.commune;
 (nwr["amenity"="bar"](area.commune); nwr["amenity"="pub"](area.commune););
 out center tags;`;
 
-const [runFile] = process.argv.slice(2);
-if (runFile === undefined) throw new Error('usage : bars-grenoble.ts <run.json>');
+const [runFile, insee] = process.argv.slice(2);
+if (runFile === undefined || insee === undefined || !/^\d[\dAB]\d{3}$/.test(insee)) {
+  throw new Error('usage : bars-commune.ts <run.json> <code INSEE>');
+}
 const run = await loadRun(runFile);
 if (run === null) process.exit(1);
 
-const elements = parseOverpassResponse(await fetchOverpass(QUERY));
+const elements = parseOverpassResponse(await fetchOverpass(query(insee)));
 // En centre-ville, deux bars distincts sont souvent à moins de 50 m : on ne fusionne que les homonymes.
 const perElement = elements.map((element) => placesFromElements([element]));
 const unnamed = perElement.flatMap((result) => result.unnamed);

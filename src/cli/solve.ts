@@ -8,18 +8,19 @@ import { loadRun, usage } from './shared.ts';
 const OSRM_URLS = {
   car: process.env['OSRM_URL'] ?? 'http://localhost:5000',
   foot: process.env['OSRM_FOOT_URL'] ?? 'http://localhost:5001',
+  train: process.env['OSRM_TRAIN_URL'] ?? 'http://localhost:5002',
 } as const;
 
 /**
  * `node src/cli/solve.ts <run.json>` → `data/<run>/tour.json`.
- * Seul lecteur de `OSRM_URL`, `OSRM_FOOT_URL` et `VROOM_URL`.
+ * Seul lecteur de `OSRM_URL`, `OSRM_FOOT_URL`, `OSRM_TRAIN_URL` et `VROOM_URL`.
  */
 export async function main(argv: readonly string[]): Promise<number> {
   const [runFile] = argv;
   if (runFile === undefined) return usage('solve <run.json>');
   const run = await loadRun(runFile);
   const profile = runProfile(await readJson(runFile));
-  if (profile === null) console.error(`${runFile} : profile attendu car | foot`);
+  if (profile === null) console.error(`${runFile} : profile attendu car | foot | train`);
   if (run === null || profile === null) return 1;
   const paths = runPaths(run);
   const places = parsePlaces(await readText(paths.places), run.bbox);

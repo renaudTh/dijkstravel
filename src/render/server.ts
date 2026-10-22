@@ -1,8 +1,8 @@
 import { createReadStream } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { stripTypeScriptTypes } from 'node:module';
-import { extname, join, normalize, sep } from 'node:path';
+import { basename, dirname, extname, join, normalize, sep } from 'node:path';
 import { writeJson } from '../files.ts';
 import { parseTheme } from '../theme.ts';
 
@@ -21,7 +21,14 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json',
   '.map': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
 };
+
+const IMAGE_EXTENSIONS = new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp']);
 
 /** Seuls `src/` et la distribution de maplibre-gl sont servis : jamais `data/` ni le reste du disque. */
 function resolvePublic(pathname: string): string | null {
@@ -66,7 +73,8 @@ async function saveTheme(request: IncomingMessage, response: ServerResponse, the
 /**
  * Sert `src/render/index.html` (rendu) et `src/render/editor.html` (éditeur de thème), les modules `.ts`
  * du projet débarrassés de leurs types (`module.stripTypeScriptTypes`), maplibre-gl depuis node_modules,
- * et le run, la tournée et le thème sous `/run.json`, `/tour.json` et `/theme.json`.
+ * le run, la tournée et le thème sous `/run.json`, `/tour.json` et `/theme.json`, et les images
+ * des lieux (dossier `images/` à côté de la tournée) sous `/images.json` et `/images/<fichier>`.
  * `editable` : accepte `PUT /theme.json`, qui écrit le thème validé dans `files.theme`.
  */
 export function servePage(files: {
@@ -81,11 +89,23 @@ export function servePage(files: {
     '/run.json': files.run,
     '/tour.json': files.tour,
   };
+  const imagesDir = join(dirname(files.tour), 'images');
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
     const send = async (): Promise<void> => {
       if (pathname === '/theme.json' && request.method === 'PUT' && files.editable) {
         await saveTheme(request, response, files.theme);
+        return;
+      }
+      if (pathname === '/images.json') {
+        // Images des lieux, rangées à côté de la tournée : `images/<id du lieu>.<ext>`.
+        const names = await readdir(imagesDir).catch(() => []);
+        const byPlace = Object.fromEntries(
+          names
+            .filter((name) => IMAGE_EXTENSIONS.has(extname(name).toLowerCase()))
+            .map((name) => [basename(name, extname(name)), `/images/${encodeURIComponent(name)}`]),
+        );
+        response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(byPlace));
         return;
       }
       if (pathname === '/theme.json') {
@@ -94,7 +114,9 @@ export function servePage(files: {
         response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(text);
         return;
       }
-      const file = aliases[pathname] ?? resolvePublic(pathname);
+      // `basename` : jamais de sortie du dossier d'images, quel que soit le chemin demandé.
+      const image = pathname.startsWith('/images/') ? join(imagesDir, basename(decodeURIComponent(pathname))) : null;
+      const file = image ?? aliases[pathname] ?? resolvePublic(pathname);
       if (file === null || !(await stat(file).catch(() => null))?.isFile()) {
         response.writeHead(404).end();
         return;

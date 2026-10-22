@@ -72,6 +72,7 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'checkbox', path: 'hud.showTitle', label: 'Afficher le titre' },
       { kind: 'checkbox', path: 'hud.showCount', label: 'Afficher le compteur de lieux' },
       { kind: 'checkbox', path: 'hud.showLastStop', label: 'Afficher le dernier lieu' },
+      { kind: 'checkbox', path: 'hud.showImage', label: "Afficher l'image du lieu (blason…)" },
     ],
   },
   {

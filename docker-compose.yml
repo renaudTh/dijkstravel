@@ -12,7 +12,7 @@ services:
     image: ghcr.io/project-osrm/osrm-backend:latest
     command: >
       osrm-routed --algorithm mld --max-table-size 10000 --max-viaroute-size 10000
-      /data/${OSRM_EXTRACT:-bretagne-latest}.osrm
+      /data/${OSRM_EXTRACT:-france-routes}.osrm
     volumes:
       - ./data/osrm:/data
     ports:
@@ -22,11 +22,25 @@ services:
     image: ghcr.io/project-osrm/osrm-backend:latest
     command: >
       osrm-routed --algorithm mld --max-table-size 10000 --max-viaroute-size 10000
-      /data/${OSRM_FOOT_EXTRACT:-grenoble-foot}.osrm
+      /data/${OSRM_FOOT_EXTRACT:-lyon-grenoble-foot}.osrm
     volumes:
       - ./data/osrm:/data
     ports:
       - '5001:5000'
+  # Réseau ferré, profil maison profiles/train.lua, pour les runs `"profile": "train"` :
+  #   osmium tags-filter france-latest.osm.pbf w/railway=rail,narrow_gauge -o france-rail.osm.pbf
+  #   osrm-extract -p /profiles/train.lua --small-component-size 1 /data/france-rail.osm.pbf (./profiles sur /profiles)
+  #   --small-component-size 1 : une ligne isolée (voie métrique…) reste à part, ses gares sont signalées
+  #   injoignables au lieu d'être accrochées au grand réseau à 20 km de là.
+  osrm-train:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    command: >
+      osrm-routed --algorithm mld --max-table-size 10000 --max-viaroute-size 10000
+      /data/${OSRM_TRAIN_EXTRACT:-france-rail}.osrm
+    volumes:
+      - ./data/osrm:/data
+    ports:
+      - '5002:5000'
   # VROOM ne reçoit que des matrices (D-4) : il n'appelle jamais OSRM.
   vroom:
     image: ghcr.io/vroom-project/vroom-docker:latest

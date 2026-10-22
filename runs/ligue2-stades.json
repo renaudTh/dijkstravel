@@ -1,0 +1,6 @@
+{
+  "name": "ligue2-stades",
+  "bbox": { "west": -5.3, "south": 41.3, "east": 9.7, "north": 51.2 },
+  "mode": "loop",
+  "video": { "format": "9:16", "durationSec": 60, "introSec": 2, "outroSec": 3 }
+}

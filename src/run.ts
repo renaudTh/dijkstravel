@@ -152,11 +152,11 @@ export function runThemeName(raw: unknown): string | null {
   return typeof name === 'string' && isThemeName(name) ? name : null;
 }
 
-export const PROFILES = ['car', 'foot'] as const;
+export const PROFILES = ['car', 'foot', 'train'] as const;
 
 export type Profile = (typeof PROFILES)[number];
 
-/** Profil de routage d'un run (`"profile": "foot"`), `car` s'il n'en déclare pas ; `null` s'il est inconnu. */
+/** Profil de routage d'un run (`"profile": "foot"`, `"train"`), `car` s'il n'en déclare pas ; `null` s'il est inconnu. */
 export function runProfile(raw: unknown): Profile | null {
   const profile = isRecord(raw) ? raw['profile'] : undefined;
   if (profile === undefined) return 'car';

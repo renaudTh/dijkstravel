@@ -8,6 +8,7 @@ import {
   type StyleSpecification,
 } from 'maplibre-gl';
 import { decimate, pathUntil, totalMeters, type MeasuredPath } from '../geo.ts';
+import { isRecord } from '../narrow.ts';
 import { parseRun, type VideoSettings } from '../run.ts';
 import { parseTour, type Tour } from '../solve/tour.ts';
 import { parseTheme, type Imagery, type Theme, type ThemeIssue } from '../theme.ts';
@@ -195,7 +196,7 @@ function themedStyle(style: StyleSpecification, theme: Theme): StyleSpecificatio
 const ROUND = { 'line-cap': 'round', 'line-join': 'round' } as const;
 
 /** Couleurs, police et éléments affichés de la carte d'infos, en variables CSS. */
-function applyHud(theme: Theme): Promise<unknown> {
+function applyHud(theme: Theme, hasImages: boolean): Promise<unknown> {
   const { hud } = theme;
   const root = document.documentElement.style;
   root.setProperty('--hud-font', `'${hud.font}'`);
@@ -210,6 +211,7 @@ function applyHud(theme: Theme): Promise<unknown> {
   element('title').classList.toggle('off', !hud.showTitle);
   element('count').classList.toggle('off', !hud.showCount);
   element('last-stop').classList.toggle('off', !hud.showLastStop);
+  element('stop-image').classList.toggle('off', !hud.showImage || !hasImages);
   element('imagery-credit').textContent = IMAGERY_SOURCES[theme.basemap.imagery].credit;
   // Police chargée avant toute capture, sinon des images sortent en police de repli.
   return Promise.all([document.fonts.load(`800 1em '${hud.font}'`), document.fonts.load(`900 1em '${hud.font}'`)]);
@@ -221,6 +223,7 @@ function draw(
   drawn: MeasuredPath,
   video: VideoSettings,
   theme: Theme,
+  images: ReadonlyMap<string, string>,
   moment: Moment,
 ): void {
   const total = totalMeters(tour.path);
@@ -257,7 +260,25 @@ function draw(
   lastStop.textContent = hud.lastStop ?? '';
   lastStop.style.visibility = hud.lastStop === null ? 'hidden' : '';
   fitOnOneLine(lastStop);
+  const image = element('stop-image');
+  const imageUrl = images.get(tour.stops[hud.visited - 1]?.id ?? '') ?? null;
+  if (image instanceof HTMLImageElement && image.getAttribute('src') !== imageUrl) {
+    if (imageUrl === null) image.removeAttribute('src');
+    else image.src = imageUrl;
+  }
+  image.style.visibility = imageUrl === null ? 'hidden' : '';
   document.body.dataset['phase'] = moment.phase;
+}
+
+/** Images décodées avant la première capture : sinon une image tombe sur la vidéo une fois sur deux. */
+function preload(images: ReadonlyMap<string, string>): Promise<unknown> {
+  return Promise.all(
+    [...images.values()].map((url) => {
+      const image = new Image();
+      image.src = url;
+      return image.decode().catch(() => undefined);
+    }),
+  );
 }
 
 /** Réduit la police d'un nom trop long jusqu'à ce qu'il tienne sur sa ligne (au-delà, points de suspension). */
@@ -286,11 +307,17 @@ function fullyRendered(map: MapLibre): Promise<void> {
 
 /** Charge `/run.json`, `/tour.json` et `/theme.json`, crée la carte, expose `renderFrame` et `applyTheme`. */
 export async function start(): Promise<void> {
-  const [rawRun, rawTour, rawTheme] = await Promise.all([
+  const [rawRun, rawTour, rawTheme, rawImages] = await Promise.all([
     fetchJson('/run.json'),
     fetchJson('/tour.json'),
     fetchJson('/theme.json'),
+    fetchJson('/images.json'),
   ]);
+  const images = new Map(
+    isRecord(rawImages)
+      ? Object.entries(rawImages).flatMap(([id, url]) => (typeof url === 'string' ? [[id, url] as const] : []))
+      : [],
+  );
   const run = parseRun(rawRun);
   if (!run.ok) throw new PageLoadError('run.json');
   const parsedTheme = parseTheme(rawTheme);
@@ -317,14 +344,17 @@ export async function start(): Promise<void> {
       return themedStyle(next, theme);
     },
   });
-  await Promise.all([map.once('load'), applyHud(theme)]);
+  await Promise.all([map.once('load'), applyHud(theme, images.size > 0), preload(images)]);
   element('title').textContent = `${String(tour.stops.length)} lieux · ${run.value.name}`;
 
   window.renderFrame = async (frame: number): Promise<void> => {
     // Horloge MapLibre figée sur l'image : rendu identique quelle que soit la vitesse de capture.
     setNow((frame * 1000) / video.fps);
-    draw(map, tour, drawn, video, theme, momentAt(frames, tour, frame));
-    await fullyRendered(map);
+    draw(map, tour, drawn, video, theme, images, momentAt(frames, tour, frame));
+    const stopImage = element('stop-image');
+    // L'image du lieu doit être affichée avant la capture, comme les tuiles de la carte.
+    const decoded = stopImage instanceof HTMLImageElement && stopImage.src !== '' ? stopImage.decode() : null;
+    await Promise.all([decoded?.catch(() => undefined), fullyRendered(map)]);
   };
   window.applyTheme = async (raw: unknown): Promise<readonly ThemeIssue[]> => {
     const next = parseTheme(raw);
@@ -332,7 +362,7 @@ export async function start(): Promise<void> {
     theme = next.value;
     // `diff` : MapLibre n'applique que les propriétés changées, sans recharger tuiles ni sources.
     if (base !== null) map.setStyle(themedStyle(base, theme), { diff: true });
-    await applyHud(theme);
+    await applyHud(theme, images.size > 0);
     return [];
   };
   window.frameCount = frameCount(frames);

@@ -1,0 +1,8 @@
+{
+  "name": "lyon-bars",
+  "bbox": { "west": 4.76, "south": 45.7, "east": 4.91, "north": 45.82 },
+  "mode": "loop",
+  "profile": "foot",
+  "theme": "nuit-or",
+  "video": { "format": "9:16", "durationSec": 145, "introSec": 2, "outroSec": 3 }
+}

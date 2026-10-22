@@ -47,6 +47,8 @@ export type Theme = {
     readonly showTitle: boolean;
     readonly showCount: boolean;
     readonly showLastStop: boolean;
+    /** Image du dernier lieu (blason, logo…) quand le run en fournit dans `data/<run>/images/`. */
+    readonly showImage: boolean;
   };
   readonly camera: {
     /** Part de l'emprise totale visible pendant le parcours. */
@@ -94,6 +96,7 @@ export const DEFAULT_THEME = {
     showTitle: true,
     showCount: true,
     showLastStop: true,
+    showImage: true,
   },
   camera: { followFraction: 1 / 8 },
 } as const satisfies Theme;
@@ -204,6 +207,7 @@ export function parseTheme(raw: unknown): Result<Theme, ThemeIssue> {
       showTitle: flag('hud.showTitle', d.hud.showTitle),
       showCount: flag('hud.showCount', d.hud.showCount),
       showLastStop: flag('hud.showLastStop', d.hud.showLastStop),
+      showImage: flag('hud.showImage', d.hud.showImage),
     },
     camera: { followFraction: number('camera.followFraction', d.camera.followFraction) },
   };

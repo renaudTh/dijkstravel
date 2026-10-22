@@ -91,9 +91,25 @@
         background: linear-gradient(90deg, var(--pill-from), var(--pill-to));
         color: var(--pill-text);
       }
+      #stop-row {
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+        min-width: 0;
+      }
+      /* Boîte de taille fixe, même sans image pour ce lieu : la carte ne change pas de hauteur. */
+      #stop-image {
+        flex: none;
+        width: 1.9em;
+        height: 1.9em;
+        object-fit: contain;
+      }
+      #last-stop {
+        min-width: 0;
+      }
       /* Masqués sans être retirés : la carte garde la même taille pendant l'intro. */
       body[data-phase='intro'] #stats,
-      body[data-phase='intro'] #last-stop {
+      body[data-phase='intro'] #stop-row {
         visibility: hidden;
       }
       #attribution {
@@ -123,7 +139,10 @@
         <div id="counter"><span id="distance"></span> <span id="total-distance"></span></div>
         <div id="count"></div>
       </div>
-      <div id="last-stop"></div>
+      <div id="stop-row">
+        <img id="stop-image" alt="" />
+        <div id="last-stop"></div>
+      </div>
     </div>
     <div id="attribution">
       © OpenStreetMap contributors · © OpenMapTiles · OpenFreeMap · <span id="imagery-credit"></span> · Mapzen Terrain
