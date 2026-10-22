@@ -162,3 +162,25 @@ export function runProfile(raw: unknown): Profile | null {
   if (profile === undefined) return 'car';
   return PROFILES.find((known) => known === profile) ?? null;
 }
+
+/** Titre affiché dans la carte d'infos (`"title": "Tous les stades de Ligue 1"`) ; `null` s'il n'y en a pas. */
+export function runTitle(raw: unknown): string | null {
+  const title = isRecord(raw) ? raw['title'] : undefined;
+  return isNonEmptyString(title) ? title.trim() : null;
+}
+
+export type Publication = { readonly caption: string; readonly hashtags: readonly string[] };
+
+/**
+ * Légende et hashtags pour les réseaux (`"publication": { "caption": "…", "hashtags": ["#…"] }`).
+ * La légende accepte `{lieux}` et `{km}`, remplacés par les chiffres de la tournée.
+ */
+export function runPublication(raw: unknown): Publication | null {
+  const publication = isRecord(raw) ? raw['publication'] : undefined;
+  if (!isRecord(publication) || !isNonEmptyString(publication['caption'])) return null;
+  const hashtags = publication['hashtags'];
+  return {
+    caption: publication['caption'],
+    hashtags: Array.isArray(hashtags) ? hashtags.filter((tag): tag is string => typeof tag === 'string') : [],
+  };
+}

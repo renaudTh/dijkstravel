@@ -19,6 +19,7 @@ const IMAGERY_LABELS: Readonly<Record<string, string>> = {
 type Field =
   | { readonly kind: 'color'; readonly path: string; readonly label: string }
   | { readonly kind: 'checkbox'; readonly path: string; readonly label: string }
+  | { readonly kind: 'text'; readonly path: string; readonly label: string }
   | { readonly kind: 'range'; readonly path: keyof typeof NUMBER_RANGES; readonly label: string; readonly step: number }
   | { readonly kind: 'font'; readonly path: 'hud.font'; readonly label: string }
   | { readonly kind: 'imagery'; readonly path: 'basemap.imagery'; readonly label: string };
@@ -41,6 +42,10 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'range', path: 'stops.unvisitedRadius', label: 'Rayon des lieux à venir', step: 0.5 },
       { kind: 'range', path: 'stops.visitedRatio', label: 'Rayon des lieux atteints', step: 0.05 },
       { kind: 'range', path: 'stops.popRadius', label: 'Ampleur du « pop »', step: 1 },
+      { kind: 'text', path: 'stops.icon', label: 'Emoji sur les lieux atteints (🏟️, 🍺…)' },
+      { kind: 'range', path: 'stops.iconSize', label: "Taille de l'emoji (px)", step: 1 },
+      { kind: 'checkbox', path: 'stops.showImageOnMap', label: 'Image du lieu (blason…) sur la carte' },
+      { kind: 'range', path: 'stops.imageSize', label: "Taille de l'image sur la carte (px)", step: 1 },
     ],
   },
   {
@@ -142,6 +147,13 @@ function control(field: Field, draft: Draft, onChange: () => void): HTMLLabelEle
     input.checked = current === true;
     input.addEventListener('change', () => {
       setAt(draft, field.path, input.checked);
+      onChange();
+    });
+  } else if (field.kind === 'text') {
+    input.value = typeof current === 'string' ? current : '';
+    input.size = 6;
+    input.addEventListener('input', () => {
+      setAt(draft, field.path, input.value);
       onChange();
     });
   } else if (field.kind === 'color') {

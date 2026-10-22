@@ -9,7 +9,7 @@ import {
 } from 'maplibre-gl';
 import { decimate, pathUntil, totalMeters, type MeasuredPath } from '../geo.ts';
 import { isRecord } from '../narrow.ts';
-import { parseRun, type VideoSettings } from '../run.ts';
+import { parseRun, runTitle, type VideoSettings } from '../run.ts';
 import { parseTour, type Tour } from '../solve/tour.ts';
 import { parseTheme, type Imagery, type Theme, type ThemeIssue } from '../theme.ts';
 import { cameraAt, frameCount, hudAt, momentAt, timeline, type Moment } from './frame.ts';
@@ -189,11 +189,93 @@ function themedStyle(style: StyleSpecification, theme: Theme): StyleSpecificatio
       { id: 'traced-core', type: 'line', source: 'traced', layout: ROUND, paint: paint['traced-core'] },
       { id: 'stops', type: 'circle', source: 'stops', paint: paint['stops'] },
       { id: 'stops-core', type: 'circle', source: 'stops', filter: ['get', 'visited'], paint: paint['stops-core'] },
+      ...(theme.stops.showImageOnMap
+        ? [
+            {
+              id: 'stops-image',
+              type: 'symbol',
+              source: 'stops',
+              filter: ['all', ['get', 'visited'], ['get', 'image']],
+              layout: {
+                'icon-image': ['concat', PLACE_IMAGE_PREFIX, ['get', 'id']],
+                // Taille fixe (lisible à toutes les échelles), grossie au « pop » puis revenue.
+                'icon-size': ['+', 1, ['*', 0.6, ['get', 'pop']]],
+                'icon-anchor': 'bottom',
+                'icon-allow-overlap': true,
+                'icon-ignore-placement': true,
+              },
+            } satisfies LayerSpecification,
+          ]
+        : []),
+      ...(theme.stops.icon === ''
+        ? []
+        : [
+            {
+              id: 'stops-icon',
+              type: 'symbol',
+              source: 'stops',
+              // L'emoji pour les lieux sans image affichée sur la carte.
+              filter: theme.stops.showImageOnMap
+                ? ['all', ['get', 'visited'], ['!', ['get', 'image']]]
+                : ['get', 'visited'],
+              layout: {
+                'icon-image': STOP_ICON,
+                // L'emoji grossit au « pop » puis revient à sa taille ; posé au-dessus du point du lieu.
+                'icon-size': byZoom(['*', theme.stops.iconSize / ICON_PIXELS, ['+', 1, ['*', 0.8, ['get', 'pop']]]]),
+                'icon-anchor': 'bottom',
+                'icon-allow-overlap': true,
+                'icon-ignore-placement': true,
+              },
+            } satisfies LayerSpecification,
+          ]),
     ],
   };
 }
 
 const ROUND = { 'line-cap': 'round', 'line-join': 'round' } as const;
+
+const STOP_ICON = 'stop-icon';
+const PLACE_IMAGE_PREFIX = 'place-';
+/** Taille de l'emoji dans l'image envoyée à MapLibre (dessinée en double résolution). */
+const ICON_PIXELS = 64;
+
+/**
+ * Images des lieux dans MapLibre, à `size` pixels (dessinées en double résolution, centrées sans déformation).
+ * Passent par un canvas : MapLibre ne sait pas dimensionner un SVG lui-même.
+ */
+function setPlaceImages(map: MapLibre, decoded: ReadonlyMap<string, HTMLImageElement>, size: number): void {
+  const pixels = size * 2;
+  for (const [id, image] of decoded) {
+    const name = `${PLACE_IMAGE_PREFIX}${id}`;
+    if (map.hasImage(name)) map.removeImage(name);
+    const canvas = document.createElement('canvas');
+    canvas.width = pixels;
+    canvas.height = pixels;
+    const context = canvas.getContext('2d');
+    if (context === null) continue;
+    const scale = Math.min(pixels / (image.naturalWidth || pixels), pixels / (image.naturalHeight || pixels));
+    const [width, height] = [(image.naturalWidth || pixels) * scale, (image.naturalHeight || pixels) * scale];
+    context.drawImage(image, (pixels - width) / 2, pixels - height, width, height);
+    map.addImage(name, context.getImageData(0, 0, pixels, pixels), { pixelRatio: 2 });
+  }
+}
+
+/** Dessine l'emoji du thème dans une image MapLibre, avec la police d'emojis en couleur du système. */
+function setStopIcon(map: MapLibre, icon: string): void {
+  if (map.hasImage(STOP_ICON)) map.removeImage(STOP_ICON);
+  if (icon === '') return;
+  const size = ICON_PIXELS * 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (context === null) return;
+  context.font = `${String(size * 0.8)}px 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(icon, size / 2, size / 2 + size * 0.05);
+  map.addImage(STOP_ICON, context.getImageData(0, 0, size, size), { pixelRatio: 2 });
+}
 
 /** Couleurs, police et éléments affichés de la carte d'infos, en variables CSS. */
 function applyHud(theme: Theme, hasImages: boolean): Promise<unknown> {
@@ -237,6 +319,8 @@ function draw(
     features: tour.stops.map((stop, index) => ({
       type: 'Feature',
       properties: {
+        id: stop.id,
+        image: images.has(stop.id),
         visited: index < hud.visited,
         pop: index < hud.visited ? Math.max(0, 1 - (meters - stop.meters) / popMeters) : 0,
       },
@@ -271,14 +355,18 @@ function draw(
 }
 
 /** Images décodées avant la première capture : sinon une image tombe sur la vidéo une fois sur deux. */
-function preload(images: ReadonlyMap<string, string>): Promise<unknown> {
-  return Promise.all(
-    [...images.values()].map((url) => {
+async function preload(images: ReadonlyMap<string, string>): Promise<Map<string, HTMLImageElement>> {
+  const decoded = await Promise.all(
+    [...images].map(async ([id, url]) => {
       const image = new Image();
       image.src = url;
-      return image.decode().catch(() => undefined);
+      return image.decode().then(
+        () => [[id, image] as const],
+        () => [],
+      );
     }),
   );
+  return new Map(decoded.flat());
 }
 
 /** Réduit la police d'un nom trop long jusqu'à ce qu'il tienne sur sa ligne (au-delà, points de suspension). */
@@ -344,8 +432,10 @@ export async function start(): Promise<void> {
       return themedStyle(next, theme);
     },
   });
-  await Promise.all([map.once('load'), applyHud(theme, images.size > 0), preload(images)]);
-  element('title').textContent = `${String(tour.stops.length)} lieux · ${run.value.name}`;
+  const [, , decoded] = await Promise.all([map.once('load'), applyHud(theme, images.size > 0), preload(images)]);
+  setStopIcon(map, theme.stops.icon);
+  setPlaceImages(map, decoded, theme.stops.imageSize);
+  element('title').textContent = runTitle(rawRun) ?? `${String(tour.stops.length)} lieux · ${run.value.name}`;
 
   window.renderFrame = async (frame: number): Promise<void> => {
     // Horloge MapLibre figée sur l'image : rendu identique quelle que soit la vitesse de capture.
@@ -361,6 +451,8 @@ export async function start(): Promise<void> {
     if (!next.ok) return next.errors;
     theme = next.value;
     // `diff` : MapLibre n'applique que les propriétés changées, sans recharger tuiles ni sources.
+    setStopIcon(map, theme.stops.icon);
+    setPlaceImages(map, decoded, theme.stops.imageSize);
     if (base !== null) map.setStyle(themedStyle(base, theme), { diff: true });
     await applyHud(theme, images.size > 0);
     return [];

@@ -14,7 +14,9 @@
     "render": "node src/cli/render.ts",
     "source:csv": "node sources/csv.ts",
     "source:overpass": "node sources/overpass.ts",
-    "editor": "node src/cli/editor.ts"
+    "editor": "node src/cli/editor.ts",
+    "publication": "node src/cli/publication.ts",
+    "upload": "node --env-file-if-exists=.env src/cli/upload.ts"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

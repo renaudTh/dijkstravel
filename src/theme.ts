@@ -20,6 +20,14 @@ export type Theme = {
     readonly visitedRatio: number;
     /** Rayon ajouté au moment où le lieu est atteint (« pop »). */
     readonly popRadius: number;
+    /** Emoji posé sur chaque lieu atteint (🏟️, 🍺…), qui « pope » avec lui ; vide : aucun. */
+    readonly icon: string;
+    /** Taille de l'emoji en pixels, au zoom d'une région. */
+    readonly iconSize: number;
+    /** Image du lieu (blason…) posée sur la carte à la place de l'emoji, quand le run en fournit. */
+    readonly showImageOnMap: boolean;
+    /** Taille de cette image en pixels, fixe : elle doit rester lisible à toutes les échelles. */
+    readonly imageSize: number;
   };
   readonly basemap: {
     readonly imagery: Imagery;
@@ -71,7 +79,16 @@ export type HudFont = (typeof HUD_FONTS)[number];
 
 export const DEFAULT_THEME = {
   route: { color: '#702963', coreColor: '#e0679f', width: 16, coreRatio: 7 / 16, coreBlurRatio: 4 / 7 },
-  stops: { unvisitedColor: '#d9d9d9', unvisitedRadius: 4, visitedRatio: 0.75, popRadius: 12 },
+  stops: {
+    unvisitedColor: '#d9d9d9',
+    unvisitedRadius: 4,
+    visitedRatio: 0.75,
+    popRadius: 12,
+    icon: '',
+    iconSize: 48,
+    showImageOnMap: false,
+    imageSize: 70,
+  },
   basemap: {
     imagery: 'nasa',
     brightness: 0.06,
@@ -111,6 +128,8 @@ export const NUMBER_RANGES = {
   'stops.unvisitedRadius': [0, 20],
   'stops.visitedRatio': [0.3, 2],
   'stops.popRadius': [0, 40],
+  'stops.iconSize': [16, 160],
+  'stops.imageSize': [24, 200],
   'basemap.brightness': [0, 1],
   'basemap.contrast': [-1, 1],
   'basemap.saturation': [-1, 1],
@@ -182,6 +201,16 @@ export function parseTheme(raw: unknown): Result<Theme, ThemeIssue> {
       unvisitedRadius: number('stops.unvisitedRadius', d.stops.unvisitedRadius),
       visitedRatio: number('stops.visitedRatio', d.stops.visitedRatio),
       popRadius: number('stops.popRadius', d.stops.popRadius),
+      icon: read(
+        'stops.icon',
+        d.stops.icon,
+        // Un emoji ou deux, pas un texte : il est dessiné en image sur la carte.
+        (value): value is string => typeof value === 'string' && value.length <= 16,
+        'emoji (16 unités UTF-16 au plus) ou vide',
+      ),
+      iconSize: number('stops.iconSize', d.stops.iconSize),
+      showImageOnMap: flag('stops.showImageOnMap', d.stops.showImageOnMap),
+      imageSize: number('stops.imageSize', d.stops.imageSize),
     },
     basemap: {
       imagery,

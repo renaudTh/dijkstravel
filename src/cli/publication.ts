@@ -1,0 +1,79 @@
+import { spawnSync } from 'node:child_process';
+import { access, writeFile } from 'node:fs/promises';
+import { readJson } from '../files.ts';
+import { frameCount, timeline } from '../render/frame.ts';
+import { runPaths, runPublication } from '../run.ts';
+import { parseTour } from '../solve/tour.ts';
+import { loadRun, usage } from './shared.ts';
+
+const km = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
+
+/**
+ * `node src/cli/publication.ts <run.json>` → `data/<run>/publication.txt` (légende prête à coller) et,
+ * si la vidéo est rendue, `data/<run>/cover.jpg` (dernière image : tracé complet dézoomé).
+ */
+export async function main(argv: readonly string[]): Promise<number> {
+  const [runFile] = argv;
+  if (runFile === undefined) return usage('publication <run.json>');
+  const run = await loadRun(runFile);
+  if (run === null) return 1;
+  const raw = await readJson(runFile);
+  const publication = runPublication(raw);
+  if (publication === null) {
+    console.error(`${runFile} : aucune section publication (caption, hashtags).`);
+    return 1;
+  }
+  const paths = runPaths(run);
+  const tour = parseTour(await readJson(paths.tour));
+  const total = tour.path.meters[tour.path.meters.length - 1] ?? 0;
+  const caption = publication.caption
+    .replaceAll('{lieux}', String(tour.stops.length))
+    .replaceAll('{km}', `${km.format(total / 1000)} km`);
+
+  const hasVideo = await access(paths.video).then(
+    () => true,
+    () => false,
+  );
+  const cover = `${paths.dir}/cover.jpg`;
+  if (hasVideo) {
+    // Toute dernière image : fin de l'outro, tracé complet dézoomé et compteurs à leur total.
+    const seconds = (frameCount(timeline(run.video)) - 1) / run.video.fps;
+    spawnSync('ffmpeg', [
+      '-y',
+      '-loglevel',
+      'error',
+      '-ss',
+      String(seconds),
+      '-i',
+      paths.video,
+      '-frames:v',
+      '1',
+      '-q:v',
+      '2',
+      cover,
+    ]);
+  }
+
+  const text = [
+    '=== LÉGENDE (à coller telle quelle) ===',
+    '',
+    caption,
+    '',
+    publication.hashtags.join(' '),
+    '',
+    '=== À PRÉPARER ===',
+    '',
+    hasVideo ? `Vidéo : ${paths.video}` : `Vidéo : pas encore rendue → npm run render -- ${runFile}`,
+    hasVideo
+      ? `Couverture : ${cover} (tracé complet dézoomé, à choisir comme miniature)`
+      : 'Couverture : générée après le rendu',
+    "Heure : en semaine vers 18 h - 21 h, ou le week-end vers midi (repère général : à ajuster d'après vos statistiques).",
+    'Sources : la mention OpenStreetMap / imagerie est déjà dans la vidéo, rien à ajouter dans la légende.',
+    '',
+  ].join('\n');
+  await writeFile(`${paths.dir}/publication.txt`, text);
+  console.log(text);
+  return 0;
+}
+
+if (import.meta.main) process.exitCode = await main(process.argv.slice(2));

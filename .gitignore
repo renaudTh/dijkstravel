@@ -1,3 +1,4 @@
 node_modules/
 data/
 vroom/access.log
+.env

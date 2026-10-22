@@ -1,6 +1,20 @@
 {
   "name": "prefectures",
-  "bbox": { "west": -5.3, "south": 41.3, "east": 9.7, "north": 51.2 },
+  "bbox": {
+    "west": -5.3,
+    "south": 41.3,
+    "east": 9.7,
+    "north": 51.2
+  },
   "mode": "loop",
-  "video": { "format": "9:16", "durationSec": 85, "introSec": 2, "outroSec": 3 }
+  "video": {
+    "format": "9:16",
+    "durationSec": 85,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Les {lieux} préfectures de France en un seul trajet 🇫🇷\n{km} de route. Tu connais celle de ton département ?",
+    "hashtags": ["#france", "#geographie", "#prefecture", "#roadtrip", "#culturegenerale"]
+  }
 }

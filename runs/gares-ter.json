@@ -1,7 +1,21 @@
 {
   "name": "gares-ter",
-  "bbox": { "west": -5.3, "south": 41.3, "east": 9.7, "north": 51.2 },
+  "bbox": {
+    "west": -5.3,
+    "south": 41.3,
+    "east": 9.7,
+    "north": 51.2
+  },
   "mode": "loop",
   "profile": "train",
-  "video": { "format": "9:16", "durationSec": 145, "introSec": 2, "outroSec": 3 }
+  "video": {
+    "format": "9:16",
+    "durationSec": 145,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Toutes les gares TER de France, en train 🚆\n{lieux} gares, {km} de rails. Ta gare est sur le trajet ?",
+    "hashtags": ["#sncf", "#ter", "#train", "#france", "#ferroviaire"]
+  }
 }

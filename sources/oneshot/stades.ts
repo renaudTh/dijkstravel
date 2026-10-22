@@ -59,6 +59,24 @@ const USER_AGENT = 'dijkstravel/0.1 (outil personnel de cartographie)';
 const slug = (text: string): string =>
   text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
+/**
+ * « Stade Geoffroy-Guichard » → « Geoffroy-Guichard », « Stade de la Meinau » → « La Meinau » : l'usage parle
+ * du stade sans le mot « stade ». Gardés tels quels : les noms sans préfixe (Allianz Riviera, Parc des Princes…)
+ * et ceux qui ne se disent pas sans lui.
+ */
+const KEEP_PREFIX = new Set(['Stade des Alpes', 'Stade de la Libération', 'Stade Océane']);
+function shortStadium(stadium: string): string {
+  if (KEEP_PREFIX.has(stadium)) return stadium;
+  // « de l' » est collé au nom (« de l'Aube ») : pas d'espace après l'apostrophe.
+  const article = /^Stade (de la |du |de l'|des |de )(.+)$/.exec(stadium);
+  if (article) {
+    const [, link = '', rest = ''] = article;
+    const short = { 'de la ': 'La ', 'du ': 'Le ', "de l'": "L'", 'des ': 'Les ', 'de ': '' }[link] ?? '';
+    return short + rest;
+  }
+  return stadium.replace(/^Stade /, '');
+}
+
 const csvField = (text: string): string => (/[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text);
 
 type LatLon = { readonly lat: number; readonly lon: number };
@@ -138,7 +156,7 @@ const located = await Promise.all(clubs.map(async (club) => {
 }));
 console.log('id,name,lat,lon,source');
 for (const club of located) {
-  const name = `${club.stadium} · ${club.club}`;
+  const name = `${shortStadium(club.stadium)} · ${club.club}`;
   const source = `https://en.wikipedia.org/wiki/${encodeURIComponent(club.article.replaceAll(' ', '_'))}`;
   console.log([slug(club.club), csvField(name), String(club.lat), String(club.lon), source].join(','));
 }
