@@ -33,6 +33,8 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'range', path: 'route.width', label: 'Épaisseur (px)', step: 1 },
       { kind: 'range', path: 'route.coreRatio', label: 'Largeur du cœur', step: 0.01 },
       { kind: 'range', path: 'route.coreBlurRatio', label: 'Flou du cœur', step: 0.01 },
+      { kind: 'checkbox', path: 'route.stripes', label: 'Trois bandes (trait, cœur, bande droite)' },
+      { kind: 'color', path: 'route.stripeColor', label: 'Couleur de la bande droite' },
     ],
   },
   {
@@ -46,6 +48,8 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'range', path: 'stops.iconSize', label: "Taille de l'emoji (px)", step: 1 },
       { kind: 'checkbox', path: 'stops.showImageOnMap', label: 'Image du lieu (blason…) sur la carte' },
       { kind: 'range', path: 'stops.imageSize', label: "Taille de l'image sur la carte (px)", step: 1 },
+      { kind: 'checkbox', path: 'stops.showLabels', label: 'Nom des lieux atteints sur la carte' },
+      { kind: 'range', path: 'stops.labelSize', label: 'Taille des noms (px)', step: 1 },
     ],
   },
   {
@@ -82,7 +86,10 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
   },
   {
     title: 'Caméra',
-    fields: [{ kind: 'range', path: 'camera.followFraction', label: "Part de l'emprise visible", step: 0.005 }],
+    fields: [
+      { kind: 'range', path: 'camera.followFraction', label: "Part de l'emprise visible", step: 0.005 },
+      { kind: 'range', path: 'camera.stopSlowdown', label: 'Ralentissement aux lieux', step: 0.1 },
+    ],
   },
 ];
 

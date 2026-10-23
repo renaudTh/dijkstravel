@@ -45,6 +45,8 @@ const KEPT_LAYERS = new Set(['boundary_2', 'boundary_3']);
 const TERRARIUM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 /** Durée de l'effet « pop » d'un lieu atteint, en secondes de vidéo. */
 const POP_SECONDS = 0.6;
+/** Part de l'outro au bout de laquelle les noms des lieux ont disparu. */
+const LABEL_FADE_PROGRESS = 0.5;
 const MAX_DRAWN_POINTS = 20_000;
 /** En dessous, le nom deviendrait illisible : on le coupe plutôt. */
 const MIN_NAME_SCALE = 0.55;
@@ -120,15 +122,36 @@ function paints(theme: Theme): Readonly<Record<string, Paint>> {
     tint: { 'background-color': basemap.tintColor, 'background-opacity': basemap.tintOpacity },
     boundary_2: border,
     boundary_3: border,
-    traced: { 'line-color': route.color, 'line-width': byZoom(route.width) },
-    'traced-core': {
-      'line-color': route.coreColor,
-      'line-width': byZoom(coreWidth),
-      'line-blur': byZoom(coreWidth * route.coreBlurRatio),
+    // Bandes : deux traits de 2/3 de large décalés d'1/6 qui se chevauchent sous la bande centrale,
+    // pour qu'aucun liseré de fond ne passe entre deux bandes voisines.
+    traced: route.stripes
+      ? {
+          'line-color': route.color,
+          'line-width': byZoom((route.width * 2) / 3),
+          'line-offset': byZoom(-route.width / 6),
+        }
+      : { 'line-color': route.color, 'line-width': byZoom(route.width), 'line-offset': 0 },
+    'traced-stripe': {
+      'line-color': route.stripeColor,
+      'line-width': byZoom((route.width * 2) / 3),
+      'line-offset': byZoom(route.width / 6),
     },
+    'traced-core': route.stripes
+      ? { 'line-color': route.coreColor, 'line-width': byZoom(route.width / 3), 'line-blur': 0 }
+      : {
+          'line-color': route.coreColor,
+          'line-width': byZoom(coreWidth),
+          'line-blur': byZoom(coreWidth * route.coreBlurRatio),
+        },
     stops: {
       'circle-color': ['case', ['get', 'visited'], route.color, stops.unvisitedColor],
       'circle-radius': byZoom(['case', ['get', 'visited'], visitedRadius, stops.unvisitedRadius]),
+    },
+    'stops-label': {
+      'text-color': theme.hud.textColor,
+      'text-halo-color': theme.hud.background,
+      'text-halo-width': 2,
+      'text-opacity': ['get', 'labelOpacity'],
     },
     'stops-core': {
       'circle-color': route.coreColor,
@@ -146,6 +169,13 @@ function paints(theme: Theme): Readonly<Record<string, Paint>> {
  */
 function themedStyle(style: StyleSpecification, theme: Theme): StyleSpecification {
   const paint = paints(theme);
+  // Lieux qui portent l'emoji du thème : il remplace leur point.
+  const withEmoji: ExpressionSpecification | null =
+    theme.stops.icon === ''
+      ? null
+      : theme.stops.showImageOnMap
+        ? ['all', ['get', 'visited'], ['!', ['get', 'image']]]
+        : ['get', 'visited'];
   const kept = style.layers.flatMap((layer): LayerSpecification[] =>
     layer.type === 'line' && KEPT_LAYERS.has(layer.id)
       ? [{ ...layer, paint: { ...layer.paint, ...paint[layer.id] } }]
@@ -185,10 +215,33 @@ function themedStyle(style: StyleSpecification, theme: Theme): StyleSpecificatio
       },
       { id: 'tint', type: 'background', paint: paint['tint'] },
       ...kept,
+      ...(theme.route.stripes
+        ? [
+            {
+              id: 'traced-stripe',
+              type: 'line',
+              source: 'traced',
+              layout: ROUND,
+              paint: paint['traced-stripe'],
+            } satisfies LayerSpecification,
+          ]
+        : []),
       { id: 'traced', type: 'line', source: 'traced', layout: ROUND, paint: paint['traced'] },
       { id: 'traced-core', type: 'line', source: 'traced', layout: ROUND, paint: paint['traced-core'] },
-      { id: 'stops', type: 'circle', source: 'stops', paint: paint['stops'] },
-      { id: 'stops-core', type: 'circle', source: 'stops', filter: ['get', 'visited'], paint: paint['stops-core'] },
+      {
+        id: 'stops',
+        type: 'circle',
+        source: 'stops',
+        filter: withEmoji === null ? true : ['!', withEmoji],
+        paint: paint['stops'],
+      },
+      {
+        id: 'stops-core',
+        type: 'circle',
+        source: 'stops',
+        filter: withEmoji === null ? ['get', 'visited'] : ['all', ['get', 'visited'], ['!', withEmoji]],
+        paint: paint['stops-core'],
+      },
       ...(theme.stops.showImageOnMap
         ? [
             {
@@ -207,17 +260,36 @@ function themedStyle(style: StyleSpecification, theme: Theme): StyleSpecificatio
             } satisfies LayerSpecification,
           ]
         : []),
-      ...(theme.stops.icon === ''
+      ...(theme.stops.showLabels
+        ? [
+            {
+              id: 'stops-label',
+              type: 'symbol',
+              source: 'stops',
+              filter: ['get', 'visited'],
+              layout: {
+                'text-field': ['get', 'label'],
+                // Seules polices du serveur de glyphes du fond (OpenFreeMap) : pas celle de la carte d'infos.
+                'text-font': ['Noto Sans Bold'],
+                'text-size': theme.stops.labelSize,
+                // Sous le lieu (l'emoji est au-dessus), sinon à côté : MapLibre prend la première place libre.
+                'text-variable-anchor': ['top', 'right', 'left'],
+                'text-radial-offset': 0.8,
+                // Le dernier lieu atteint passe avant les autres quand deux noms se chevauchent.
+                'symbol-sort-key': ['-', ['get', 'index']],
+              },
+              paint: paint['stops-label'],
+            } satisfies LayerSpecification,
+          ]
+        : []),
+      ...(withEmoji === null
         ? []
         : [
             {
               id: 'stops-icon',
               type: 'symbol',
               source: 'stops',
-              // L'emoji pour les lieux sans image affichée sur la carte.
-              filter: theme.stops.showImageOnMap
-                ? ['all', ['get', 'visited'], ['!', ['get', 'image']]]
-                : ['get', 'visited'],
+              filter: withEmoji,
               layout: {
                 'icon-image': STOP_ICON,
                 // L'emoji grossit au « pop » puis revient à sa taille ; posé au-dessus du point du lieu.
@@ -320,6 +392,11 @@ function draw(
       type: 'Feature',
       properties: {
         id: stop.id,
+        index,
+        // « Agen · Lot-et-Garonne (47) » → « Agen » : le reste encombre la carte, la carte d'infos l'affiche.
+        label: stop.name.split(' · ')[0] ?? stop.name,
+        // Effacés pendant le dézoom final : à l'échelle du pays, ils couvriraient le tracé (et la couverture).
+        labelOpacity: moment.phase === 'outro' ? Math.max(0, 1 - moment.progress / LABEL_FADE_PROGRESS) : 1,
         image: images.has(stop.id),
         visited: index < hud.visited,
         pop: index < hud.visited ? Math.max(0, 1 - (meters - stop.meters) / popMeters) : 0,
@@ -440,7 +517,7 @@ export async function start(): Promise<void> {
   window.renderFrame = async (frame: number): Promise<void> => {
     // Horloge MapLibre figée sur l'image : rendu identique quelle que soit la vitesse de capture.
     setNow((frame * 1000) / video.fps);
-    draw(map, tour, drawn, video, theme, images, momentAt(frames, tour, frame));
+    draw(map, tour, drawn, video, theme, images, momentAt(frames, tour, frame, theme.camera.stopSlowdown));
     const stopImage = element('stop-image');
     // L'image du lieu doit être affichée avant la capture, comme les tuiles de la carte.
     const decoded = stopImage instanceof HTMLImageElement && stopImage.src !== '' ? stopImage.decode() : null;

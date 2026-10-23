@@ -12,6 +12,9 @@ export type Theme = {
     readonly coreRatio: number;
     /** Flou du cœur rapporté à sa largeur. */
     readonly coreBlurRatio: number;
+    /** Trois bandes côte à côte (`color` à gauche, `coreColor` au centre, `stripeColor` à droite) au lieu du cœur lumineux. */
+    readonly stripes: boolean;
+    readonly stripeColor: string;
   };
   readonly stops: {
     readonly unvisitedColor: string;
@@ -28,6 +31,10 @@ export type Theme = {
     readonly showImageOnMap: boolean;
     /** Taille de cette image en pixels, fixe : elle doit rester lisible à toutes les échelles. */
     readonly imageSize: number;
+    /** Nom du lieu écrit sur la carte dès qu'il est atteint ; un nom qui en chevaucherait un autre n'est pas écrit. */
+    readonly showLabels: boolean;
+    /** Taille de ce nom en pixels, fixe comme l'image. */
+    readonly labelSize: number;
   };
   readonly basemap: {
     readonly imagery: Imagery;
@@ -61,6 +68,8 @@ export type Theme = {
   readonly camera: {
     /** Part de l'emprise totale visible pendant le parcours. */
     readonly followFraction: number;
+    /** Ralentissement au passage d'un lieu, rattrapé entre les lieux (2 : trois fois plus lent) ; 0 : allure constante. */
+    readonly stopSlowdown: number;
   };
 };
 
@@ -78,7 +87,15 @@ export const HUD_FONTS = ['Nunito', 'Quicksand', 'Fredoka', 'Baloo 2', 'Poppins'
 export type HudFont = (typeof HUD_FONTS)[number];
 
 export const DEFAULT_THEME = {
-  route: { color: '#702963', coreColor: '#e0679f', width: 16, coreRatio: 7 / 16, coreBlurRatio: 4 / 7 },
+  route: {
+    color: '#702963',
+    coreColor: '#e0679f',
+    width: 16,
+    coreRatio: 7 / 16,
+    coreBlurRatio: 4 / 7,
+    stripes: false,
+    stripeColor: '#ffffff',
+  },
   stops: {
     unvisitedColor: '#d9d9d9',
     unvisitedRadius: 4,
@@ -88,6 +105,8 @@ export const DEFAULT_THEME = {
     iconSize: 48,
     showImageOnMap: false,
     imageSize: 70,
+    showLabels: false,
+    labelSize: 28,
   },
   basemap: {
     imagery: 'nasa',
@@ -115,7 +134,7 @@ export const DEFAULT_THEME = {
     showLastStop: true,
     showImage: true,
   },
-  camera: { followFraction: 1 / 8 },
+  camera: { followFraction: 1 / 8, stopSlowdown: 0 },
 } as const satisfies Theme;
 
 export type ThemeIssue = { readonly path: string; readonly expected: string };
@@ -130,6 +149,7 @@ export const NUMBER_RANGES = {
   'stops.popRadius': [0, 40],
   'stops.iconSize': [16, 160],
   'stops.imageSize': [24, 200],
+  'stops.labelSize': [12, 60],
   'basemap.brightness': [0, 1],
   'basemap.contrast': [-1, 1],
   'basemap.saturation': [-1, 1],
@@ -137,6 +157,7 @@ export const NUMBER_RANGES = {
   'basemap.tintOpacity': [0, 0.9],
   'hud.size': [12, 60],
   'camera.followFraction': [0.02, 1],
+  'camera.stopSlowdown': [0, 5],
 } as const satisfies Record<string, readonly [number, number]>;
 
 const COLOR = /^#[0-9a-f]{6}$/i;
@@ -195,6 +216,8 @@ export function parseTheme(raw: unknown): Result<Theme, ThemeIssue> {
       width: number('route.width', d.route.width),
       coreRatio: number('route.coreRatio', d.route.coreRatio),
       coreBlurRatio: number('route.coreBlurRatio', d.route.coreBlurRatio),
+      stripes: flag('route.stripes', d.route.stripes),
+      stripeColor: color('route.stripeColor', d.route.stripeColor),
     },
     stops: {
       unvisitedColor: color('stops.unvisitedColor', d.stops.unvisitedColor),
@@ -211,6 +234,8 @@ export function parseTheme(raw: unknown): Result<Theme, ThemeIssue> {
       iconSize: number('stops.iconSize', d.stops.iconSize),
       showImageOnMap: flag('stops.showImageOnMap', d.stops.showImageOnMap),
       imageSize: number('stops.imageSize', d.stops.imageSize),
+      showLabels: flag('stops.showLabels', d.stops.showLabels),
+      labelSize: number('stops.labelSize', d.stops.labelSize),
     },
     basemap: {
       imagery,
@@ -238,7 +263,10 @@ export function parseTheme(raw: unknown): Result<Theme, ThemeIssue> {
       showLastStop: flag('hud.showLastStop', d.hud.showLastStop),
       showImage: flag('hud.showImage', d.hud.showImage),
     },
-    camera: { followFraction: number('camera.followFraction', d.camera.followFraction) },
+    camera: {
+      followFraction: number('camera.followFraction', d.camera.followFraction),
+      stopSlowdown: number('camera.stopSlowdown', d.camera.stopSlowdown),
+    },
   };
   return issues.length > 0 ? { ok: false, errors: issues } : { ok: true, value: theme };
 }

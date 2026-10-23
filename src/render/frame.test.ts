@@ -113,3 +113,33 @@ describe('momentAt and hudAt', () => {
     assert.deepEqual(decreases(travelHuds().map((hud) => hud.visited)), []);
   });
 });
+
+describe('momentAt with a slowdown near places', () => {
+  const SLOWDOWN = 2;
+
+  function travelMeters(): number[] {
+    return travelFrames().flatMap((frame) => {
+      const moment = momentAt(TIMELINE, TOUR, frame, SLOWDOWN);
+      return moment.phase === 'travel' ? [moment.meters] : [];
+    });
+  }
+
+  function stepAcross(meters: readonly number[], at: number): number {
+    const i = meters.findIndex((value, index) => value <= at && (meters[index + 1] ?? -Infinity) > at);
+    return (meters[i + 1] ?? NaN) - (meters[i] ?? NaN);
+  }
+
+  test('moves slower when passing a place than halfway between two places', () => {
+    const meters = travelMeters();
+
+    assert.ok(stepAcross(meters, 1000) < stepAcross(meters, 1500));
+  });
+
+  test('still reaches the full length on the last travel frame', () => {
+    assert.equal(travelMeters().at(-1), LENGTH);
+  });
+
+  test('never goes backwards', () => {
+    assert.deepEqual(decreases(travelMeters()), []);
+  });
+});

@@ -46,14 +46,66 @@ export function frameCount(timeline: Timeline): number {
 
 const progressOf = (index: number, count: number): number => (count <= 1 ? 1 : Math.min(1, index / (count - 1)));
 
-export function momentAt(timeline: Timeline, tour: Tour, frame: number): Moment {
+/**
+ * `slowdown` : temps passé de plus par mètre au passage d'un lieu (2 : trois fois plus lent), rattrapé
+ * entre les lieux ; la durée du trajet ne change pas. 0 : allure constante.
+ */
+export function momentAt(timeline: Timeline, tour: Tour, frame: number, slowdown = 0): Moment {
   if (frame < timeline.intro) return { phase: 'intro', progress: progressOf(frame, timeline.intro) };
   const travelFrame = frame - timeline.intro;
   if (travelFrame < timeline.travel) {
-    return { phase: 'travel', meters: totalMeters(tour.path) * progressOf(travelFrame, timeline.travel) };
+    return { phase: 'travel', meters: metersAt(tour, progressOf(travelFrame, timeline.travel), slowdown) };
   }
   return { phase: 'outro', progress: progressOf(travelFrame - timeline.travel, timeline.outro) };
 }
+
+/** Distances échantillonnées le long du trajet et temps relatif cumulé pour atteindre chacune. */
+type Pace = { readonly meters: readonly number[]; readonly time: readonly number[] };
+
+const PACE_SAMPLES = 8192;
+/** Demi-largeur de la zone ralentie autour d'un lieu, en part de l'écart moyen entre deux lieux. */
+const SLOW_ZONE = 0.25;
+const paces = new WeakMap<Tour, Map<number, Pace>>();
+
+function metersAt(tour: Tour, progress: number, slowdown: number): number {
+  const total = totalMeters(tour.path);
+  if (slowdown === 0 || total === 0 || progress >= 1) return total * progress;
+  const { meters, time } = paceOf(tour, slowdown);
+  const target = progress * (time.at(-1) ?? 0);
+  let [low, high] = [0, time.length - 1];
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if ((time[middle] ?? 0) <= target) low = middle;
+    else high = middle;
+  }
+  const [t0, t1, m0, m1] = [time[low] ?? 0, time[high] ?? 0, meters[low] ?? 0, meters[high] ?? 0];
+  return t1 === t0 ? m0 : lerp(m0, m1, (target - t0) / (t1 - t0));
+}
+
+function paceOf(tour: Tour, slowdown: number): Pace {
+  const cached = paces.get(tour)?.get(slowdown);
+  if (cached !== undefined) return cached;
+  const total = totalMeters(tour.path);
+  const radius = (SLOW_ZONE * total) / Math.max(1, tour.stops.length);
+  const meters = Array.from({ length: PACE_SAMPLES + 1 }, (_, i) => (total * i) / PACE_SAMPLES);
+  // ponytail: chaque échantillon contre chaque lieu, une fois par tournée (12 M d'opérations pour 1 500 lieux) ;
+  // deux curseurs sur les lieux triés si une tournée en compte des dizaines de milliers.
+  // Le plus fort ralentissement, pas leur somme : un groupe de lieux proches ne s'éternise pas.
+  const slowness = meters.map(
+    (at) => 1 + slowdown * Math.max(0, ...tour.stops.map((stop) => bump(Math.abs(at - stop.meters) / radius))),
+  );
+  const time = [0];
+  for (let i = 1; i < meters.length; i++) {
+    const step = (((slowness[i - 1] ?? 1) + (slowness[i] ?? 1)) / 2) * ((meters[i] ?? 0) - (meters[i - 1] ?? 0));
+    time.push((time[i - 1] ?? 0) + step);
+  }
+  const pace = { meters, time };
+  paces.set(tour, (paces.get(tour) ?? new Map<number, Pace>()).set(slowdown, pace));
+  return pace;
+}
+
+/** 1 sur le lieu, 0 à partir d'une demi-zone, en cloche : la caméra freine et repart sans à-coup. */
+const bump = (distance: number): number => (distance >= 1 ? 0 : (1 + Math.cos(Math.PI * distance)) / 2);
 
 /** Un lieu est visité dès que `meters` atteint sa distance d'arrivée. */
 export function hudAt(tour: Tour, meters: number): Hud {
