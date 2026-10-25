@@ -85,6 +85,39 @@ export function pathUntil(path: MeasuredPath, meters: number): LonLat[] {
   return [...path.points.slice(0, index + 1), interpolate(path, index, meters)];
 }
 
+/** Tracé entre `from` et `to` mètres, extrémités interpolées ; vide si l'intervalle l'est. */
+export function pathBetween(path: MeasuredPath, from: number, to: number): LonLat[] {
+  const start = Math.max(0, from);
+  const end = Math.min(totalMeters(path), to);
+  if (end <= start) return [];
+  const inside = path.points.filter((_, i) => {
+    const at = path.meters[i] ?? 0;
+    return at > start && at < end;
+  });
+  return [pointAt(path, start), ...inside, pointAt(path, end)];
+}
+
+export type Crossing = { readonly points: LonLat[]; readonly ferry: boolean };
+
+/**
+ * Tracé parcouru jusqu'à `meters`, découpé en morceaux de route et de traversée en bateau (`ferries`,
+ * en mètres, dans l'ordre) : chacun se dessine dans sa couleur.
+ */
+export function splitCrossings(
+  path: MeasuredPath,
+  ferries: readonly (readonly [number, number])[],
+  meters: number,
+): Crossing[] {
+  const pieces: Crossing[] = [];
+  let cursor = 0;
+  for (const [from, to] of [...ferries, [Infinity, Infinity] as const]) {
+    pieces.push({ points: pathBetween(path, cursor, Math.min(from, meters)), ferry: false });
+    pieces.push({ points: pathBetween(path, from, Math.min(to, meters)), ferry: true });
+    cursor = to;
+  }
+  return pieces.filter((piece) => piece.points.length >= 2);
+}
+
 /**
  * Sous-ensemble des sommets espacés d'au moins `minMeters`, distances cumulées d'origine conservées :
  * `pointAt` et `pathUntil` restent alignés sur le tracé complet.

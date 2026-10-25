@@ -7,11 +7,12 @@ import {
   type LayerSpecification,
   type StyleSpecification,
 } from 'maplibre-gl';
-import { decimate, pathUntil, totalMeters, type MeasuredPath } from '../geo.ts';
+import { decimate, pointAt, splitCrossings, totalMeters, type MeasuredPath } from '../geo.ts';
 import { isRecord } from '../narrow.ts';
 import { parseRun, runTitle, type VideoSettings } from '../run.ts';
 import { parseTour, type Tour } from '../solve/tour.ts';
-import { parseTheme, type Imagery, type Theme, type ThemeIssue } from '../theme.ts';
+import { IMAGERY_SOURCES } from '../imagery.ts';
+import { parseTheme, type Theme, type ThemeIssue } from '../theme.ts';
 import { cameraAt, frameCount, hudAt, momentAt, timeline, type Moment } from './frame.ts';
 
 declare global {
@@ -19,28 +20,14 @@ declare global {
     /** Résolue quand la carte est entièrement chargée (`idle`). */
     renderFrame: (frame: number) => Promise<void>;
     frameCount: number;
+    /** Sources encore en chargement, pour le diagnostic d'une image qui ne se termine pas. */
+    pendingSources: () => string[];
     /** Applique un thème à chaud (éditeur) ; renvoie ses problèmes, sans rien changer s'il en a. */
     applyTheme: (raw: unknown) => Promise<readonly ThemeIssue[]>;
   }
 }
 
 const BASEMAP = 'https://tiles.openfreemap.org/styles/liberty';
-const IMAGERY_SOURCES = {
-  /** NASA Blue Marble (domaine public), 500 m/pixel : volontairement peu détaillé, rien au-delà du zoom 8. */
-  nasa: {
-    tiles:
-      'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_NextGeneration/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg',
-    maxzoom: 8,
-    credit: 'NASA Blue Marble',
-  },
-  /** Orthophoto IGN (licence ouverte Etalab 2.0), 20 cm/pixel, France seulement. */
-  ign: {
-    tiles:
-      'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
-    maxzoom: 19,
-    credit: 'Orthophoto © IGN',
-  },
-} as const satisfies Record<Imagery, { tiles: string; maxzoom: number; credit: string }>;
 const KEPT_LAYERS = new Set(['boundary_2', 'boundary_3']);
 const TERRARIUM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 /** Durée de l'effet « pop » d'un lieu atteint, en secondes de vidéo. */
@@ -73,9 +60,12 @@ function element(id: string): HTMLElement {
   return found;
 }
 
-const line = (coordinates: readonly (readonly [number, number])[]): GeoJSON.Feature => ({
+const line = (
+  coordinates: readonly (readonly [number, number])[],
+  properties: GeoJSON.GeoJsonProperties = {},
+): GeoJSON.Feature => ({
   type: 'Feature',
-  properties: {},
+  properties,
   geometry: { type: 'LineString', coordinates: coordinates.map(([lon, lat]) => [lon, lat]) },
 });
 
@@ -112,6 +102,9 @@ function paints(theme: Theme): Readonly<Record<string, Paint>> {
     ['*', stops.popRadius, ['get', 'pop']],
   ];
   const border = { 'line-color': basemap.borderColor, 'line-opacity': basemap.borders ? 0.6 : 0 };
+  // Traversées en bateau dans leur couleur, bandes comprises.
+  const routeColor: ExpressionSpecification = ['case', ['get', 'ferry'], route.ferryColor, route.color];
+  const stripeColor: ExpressionSpecification = ['case', ['get', 'ferry'], route.ferryColor, route.stripeColor];
   return {
     satellite: {
       'raster-brightness-min': basemap.brightness,
@@ -126,13 +119,13 @@ function paints(theme: Theme): Readonly<Record<string, Paint>> {
     // pour qu'aucun liseré de fond ne passe entre deux bandes voisines.
     traced: route.stripes
       ? {
-          'line-color': route.color,
+          'line-color': routeColor,
           'line-width': byZoom((route.width * 2) / 3),
           'line-offset': byZoom(-route.width / 6),
         }
-      : { 'line-color': route.color, 'line-width': byZoom(route.width), 'line-offset': 0 },
+      : { 'line-color': routeColor, 'line-width': byZoom(route.width), 'line-offset': 0 },
     'traced-stripe': {
-      'line-color': route.stripeColor,
+      'line-color': stripeColor,
       'line-width': byZoom((route.width * 2) / 3),
       'line-offset': byZoom(route.width / 6),
     },
@@ -146,6 +139,12 @@ function paints(theme: Theme): Readonly<Record<string, Paint>> {
     stops: {
       'circle-color': ['case', ['get', 'visited'], route.color, stops.unvisitedColor],
       'circle-radius': byZoom(['case', ['get', 'visited'], visitedRadius, stops.unvisitedRadius]),
+    },
+    head: {
+      'circle-color': route.headColor,
+      'circle-radius': byZoom(route.headRadius),
+      'circle-stroke-color': route.color,
+      'circle-stroke-width': byZoom(route.width / 4),
     },
     'stops-label': {
       'text-color': theme.hud.textColor,
@@ -188,13 +187,15 @@ function themedStyle(style: StyleSpecification, theme: Theme): StyleSpecificatio
       ...style.sources,
       satellite: {
         type: 'raster',
-        tiles: [IMAGERY_SOURCES[theme.basemap.imagery].tiles],
+        // Par le serveur de rendu (cache disque, nouvel essai) : jamais une tuile manquante à la capture.
+        tiles: [`${location.origin}/imagery/${theme.basemap.imagery}/{z}/{x}/{y}`],
         tileSize: 256,
         maxzoom: IMAGERY_SOURCES[theme.basemap.imagery].maxzoom,
       },
       dem: { type: 'raster-dem', tiles: [TERRARIUM], encoding: 'terrarium', tileSize: 256, maxzoom: 12 },
-      traced: { type: 'geojson', data: line([]) },
+      traced: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
       stops: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
+      head: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } },
     },
     layers: [
       {
@@ -228,6 +229,24 @@ function themedStyle(style: StyleSpecification, theme: Theme): StyleSpecificatio
         : []),
       { id: 'traced', type: 'line', source: 'traced', layout: ROUND, paint: paint['traced'] },
       { id: 'traced-core', type: 'line', source: 'traced', layout: ROUND, paint: paint['traced-core'] },
+      ...(theme.route.headRadius === 0
+        ? []
+        : theme.route.headIcon === ''
+          ? [{ id: 'head', type: 'circle', source: 'head', paint: paint['head'] } satisfies LayerSpecification]
+          : [
+              {
+                id: 'head',
+                type: 'symbol',
+                source: 'head',
+                layout: {
+                  'icon-image': HEAD_ICON,
+                  // Diamètre : deux fois `headRadius`, comme le point qu'il remplace.
+                  'icon-size': byZoom((theme.route.headRadius * 2) / ICON_PIXELS),
+                  'icon-allow-overlap': true,
+                  'icon-ignore-placement': true,
+                },
+              } satisfies LayerSpecification,
+            ]),
       {
         id: 'stops',
         type: 'circle',
@@ -307,6 +326,7 @@ function themedStyle(style: StyleSpecification, theme: Theme): StyleSpecificatio
 const ROUND = { 'line-cap': 'round', 'line-join': 'round' } as const;
 
 const STOP_ICON = 'stop-icon';
+const HEAD_ICON = 'head-icon';
 const PLACE_IMAGE_PREFIX = 'place-';
 /** Taille de l'emoji dans l'image envoyée à MapLibre (dessinée en double résolution). */
 const ICON_PIXELS = 64;
@@ -333,8 +353,8 @@ function setPlaceImages(map: MapLibre, decoded: ReadonlyMap<string, HTMLImageEle
 }
 
 /** Dessine l'emoji du thème dans une image MapLibre, avec la police d'emojis en couleur du système. */
-function setStopIcon(map: MapLibre, icon: string): void {
-  if (map.hasImage(STOP_ICON)) map.removeImage(STOP_ICON);
+function setEmojiImage(map: MapLibre, name: string, icon: string): void {
+  if (map.hasImage(name)) map.removeImage(name);
   if (icon === '') return;
   const size = ICON_PIXELS * 2;
   const canvas = document.createElement('canvas');
@@ -346,7 +366,13 @@ function setStopIcon(map: MapLibre, icon: string): void {
   context.textAlign = 'center';
   context.textBaseline = 'middle';
   context.fillText(icon, size / 2, size / 2 + size * 0.05);
-  map.addImage(STOP_ICON, context.getImageData(0, 0, size, size), { pixelRatio: 2 });
+  map.addImage(name, context.getImageData(0, 0, size, size), { pixelRatio: 2 });
+}
+
+/** Emoji des lieux atteints et emoji de la tête du tracé, en images MapLibre. */
+function setIcons(map: MapLibre, theme: Theme): void {
+  setEmojiImage(map, STOP_ICON, theme.stops.icon);
+  setEmojiImage(map, HEAD_ICON, theme.route.headIcon);
 }
 
 /** Couleurs, police et éléments affichés de la carte d'infos, en variables CSS. */
@@ -385,7 +411,19 @@ function draw(
   const hud = hudAt(tour, meters);
   const popMeters = (total / video.durationSec) * POP_SECONDS;
 
-  void source(map, 'traced').setData(line(pathUntil(drawn, meters)));
+  void source(map, 'traced').setData({
+    type: 'FeatureCollection',
+    features: splitCrossings(drawn, tour.ferries, meters).map((piece) => line(piece.points, { ferry: piece.ferry })),
+  });
+  // Tête : seulement pendant le parcours (ni avant le départ, ni sur la vue d'ensemble finale).
+  const head = pointAt(drawn, meters);
+  void source(map, 'head').setData({
+    type: 'FeatureCollection',
+    features:
+      moment.phase === 'travel'
+        ? [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [head[0], head[1]] } }]
+        : [],
+  });
   void source(map, 'stops').setData({
     type: 'FeatureCollection',
     features: tour.stops.map((stop, index) => ({
@@ -454,20 +492,33 @@ function fitOnOneLine(element: HTMLElement): void {
   }
 }
 
+/** Intervalle des rendus redemandés pendant l'attente des tuiles. */
+const REPAINT_MS = 250;
+
 /**
  * Résolue après le premier rendu où toutes les tuiles sont chargées. Pas `idle` : avec l'horloge
- * figée, MapLibre peut redemander des images indéfiniment et `idle` ne vient jamais.
+ * figée, MapLibre peut redemander des images indéfiniment et `idle` ne vient jamais. Rendu redemandé
+ * régulièrement : une dernière tuile arrivée sans nouveau rendu laissait la capture attendre pour toujours.
  */
 function fullyRendered(map: MapLibre): Promise<void> {
   return new Promise((resolve) => {
     const check = (): void => {
       if (!map.loaded() || !map.areTilesLoaded()) return;
       map.off('render', check);
+      clearInterval(repaint);
       resolve();
     };
+    const repaint = setInterval(() => {
+      map.triggerRepaint();
+    }, REPAINT_MS);
     map.on('render', check);
     map.triggerRepaint();
   });
+}
+
+/** Sources de la carte encore en chargement : diagnostic d'une image qui ne se termine pas. */
+function pendingSources(map: MapLibre): string[] {
+  return Object.keys(map.getStyle().sources).filter((id) => !map.isSourceLoaded(id));
 }
 
 /** Charge `/run.json`, `/tour.json` et `/theme.json`, crée la carte, expose `renderFrame` et `applyTheme`. */
@@ -510,7 +561,7 @@ export async function start(): Promise<void> {
     },
   });
   const [, , decoded] = await Promise.all([map.once('load'), applyHud(theme, images.size > 0), preload(images)]);
-  setStopIcon(map, theme.stops.icon);
+  setIcons(map, theme);
   setPlaceImages(map, decoded, theme.stops.imageSize);
   element('title').textContent = runTitle(rawRun) ?? `${String(tour.stops.length)} lieux · ${run.value.name}`;
 
@@ -528,12 +579,13 @@ export async function start(): Promise<void> {
     if (!next.ok) return next.errors;
     theme = next.value;
     // `diff` : MapLibre n'applique que les propriétés changées, sans recharger tuiles ni sources.
-    setStopIcon(map, theme.stops.icon);
+    setIcons(map, theme);
     setPlaceImages(map, decoded, theme.stops.imageSize);
     if (base !== null) map.setStyle(themedStyle(base, theme), { diff: true });
     await applyHud(theme, images.size > 0);
     return [];
   };
+  window.pendingSources = () => pendingSources(map);
   window.frameCount = frameCount(frames);
 
   const requested = new URLSearchParams(location.search).get('frame');

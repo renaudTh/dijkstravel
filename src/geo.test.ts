@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pathUntil, pointAt } from './geo.ts';
+import { pathBetween, pathUntil, pointAt, splitCrossings } from './geo.ts';
 import type { LonLat, MeasuredPath } from './geo.ts';
 
 // Le long d'un méridien : l'interpolation linéaire et géodésique coïncident.
@@ -70,5 +70,55 @@ describe('pathUntil', () => {
       [2, 47],
       [2, 49],
     ]);
+  });
+});
+
+describe('pathBetween', () => {
+  test('interpolates both ends inside the path', () => {
+    assert.deepEqual(pathBetween(PATH, 500, 2000).map(rounded), [
+      [2, 46.5],
+      [2, 47],
+      [2, 48],
+    ]);
+  });
+
+  test('traces nothing over an empty interval', () => {
+    assert.deepEqual(pathBetween(PATH, 2000, 2000), []);
+  });
+});
+
+describe('splitCrossings', () => {
+  test('keeps a road-only path in one piece', () => {
+    const pieces = splitCrossings(PATH, [], LENGTH);
+
+    assert.deepEqual(
+      pieces.map((piece) => piece.ferry),
+      [false],
+    );
+  });
+
+  test('cuts the path around a ferry crossing', () => {
+    const pieces = splitCrossings(PATH, [[1000, 2000]], LENGTH);
+
+    assert.deepEqual(
+      pieces.map((piece) => [piece.ferry, rounded(piece.points[0] ?? [0, 0]), rounded(piece.points.at(-1) ?? [0, 0])]),
+      [
+        [false, [2, 46], [2, 47]],
+        [true, [2, 47], [2, 48]],
+        [false, [2, 48], [2, 49]],
+      ],
+    );
+  });
+
+  test('stops the pieces at the distance travelled', () => {
+    const pieces = splitCrossings(PATH, [[1000, 2000]], 1500);
+
+    assert.deepEqual(
+      pieces.map((piece) => [piece.ferry, rounded(piece.points.at(-1) ?? [0, 0])]),
+      [
+        [false, [2, 47]],
+        [true, [2, 47.5]],
+      ],
+    );
   });
 });

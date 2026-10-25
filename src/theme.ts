@@ -15,6 +15,17 @@ export type Theme = {
     /** Trois bandes côte à côte (`color` à gauche, `coreColor` au centre, `stripeColor` à droite) au lieu du cœur lumineux. */
     readonly stripes: boolean;
     readonly stripeColor: string;
+    /** Couleur du trait sur les traversées en bateau (bac, pirogue) ; celle du trait si le thème n'en donne pas. */
+    readonly ferryColor: string;
+    /**
+     * Rayon du point posé sur la tête du tracé, en pixels au zoom d'une région ; 0 : pas de point. Sans lui,
+     * la tête se perd dans le trait déjà tracé quand on repasse sur une route dans l'autre sens.
+     */
+    readonly headRadius: number;
+    /** Couleur de ce point, cerclé de `color` ; celle du cœur si le thème n'en donne pas. */
+    readonly headColor: string;
+    /** Emoji à la place du point (⚽…), de diamètre deux fois `headRadius` ; vide : le point. */
+    readonly headIcon: string;
   };
   readonly stops: {
     readonly unvisitedColor: string;
@@ -75,9 +86,10 @@ export type Theme = {
 
 /**
  * Imagerie du fond : `nasa` (Blue Marble, 500 m/pixel, pays et régions), `ign` (orthophoto IGN,
- * 20 cm/pixel, France seulement, pour une ville).
+ * 20 cm/pixel, France seulement, pour une ville ; blanche au large des côtes), `sentinel` (Sentinel-2
+ * cloudless, 10 m/pixel, monde entier mer comprise : îles et littoraux).
  */
-export const IMAGERIES = ['nasa', 'ign'] as const;
+export const IMAGERIES = ['nasa', 'ign', 'sentinel'] as const;
 
 export type Imagery = (typeof IMAGERIES)[number];
 
@@ -95,6 +107,10 @@ export const DEFAULT_THEME = {
     coreBlurRatio: 4 / 7,
     stripes: false,
     stripeColor: '#ffffff',
+    ferryColor: '#702963',
+    headRadius: 0,
+    headColor: '#e0679f',
+    headIcon: '',
   },
   stops: {
     unvisitedColor: '#d9d9d9',
@@ -144,6 +160,7 @@ export const NUMBER_RANGES = {
   'route.width': [2, 40],
   'route.coreRatio': [0, 1],
   'route.coreBlurRatio': [0, 1],
+  'route.headRadius': [0, 40],
   'stops.unvisitedRadius': [0, 20],
   'stops.visitedRatio': [0.3, 2],
   'stops.popRadius': [0, 40],
@@ -185,6 +202,14 @@ export function parseTheme(raw: unknown): Result<Theme, ThemeIssue> {
   };
   const color = (path: string, fallback: string): string =>
     read(path, fallback, (value): value is string => typeof value === 'string' && COLOR.test(value), 'couleur #rrggbb');
+  // Un emoji ou deux, pas un texte : il est dessiné en image sur la carte.
+  const emoji = (path: string, fallback: string): string =>
+    read(
+      path,
+      fallback,
+      (value): value is string => typeof value === 'string' && value.length <= 16,
+      'emoji (16 unités UTF-16 au plus) ou vide',
+    );
   const flag = (path: string, fallback: boolean): boolean =>
     read(path, fallback, (value): value is boolean => typeof value === 'boolean', 'booléen');
   const number = (path: NumberPath, fallback: number): number => {
@@ -209,28 +234,28 @@ export function parseTheme(raw: unknown): Result<Theme, ThemeIssue> {
     IMAGERIES.join(' | '),
   );
   const d = DEFAULT_THEME;
+  const routeColor = color('route.color', d.route.color);
+  const coreColor = color('route.coreColor', d.route.coreColor);
   const theme: Theme = {
     route: {
-      color: color('route.color', d.route.color),
-      coreColor: color('route.coreColor', d.route.coreColor),
+      color: routeColor,
+      coreColor,
       width: number('route.width', d.route.width),
       coreRatio: number('route.coreRatio', d.route.coreRatio),
       coreBlurRatio: number('route.coreBlurRatio', d.route.coreBlurRatio),
       stripes: flag('route.stripes', d.route.stripes),
       stripeColor: color('route.stripeColor', d.route.stripeColor),
+      ferryColor: color('route.ferryColor', routeColor),
+      headRadius: number('route.headRadius', d.route.headRadius),
+      headColor: color('route.headColor', coreColor),
+      headIcon: emoji('route.headIcon', d.route.headIcon),
     },
     stops: {
       unvisitedColor: color('stops.unvisitedColor', d.stops.unvisitedColor),
       unvisitedRadius: number('stops.unvisitedRadius', d.stops.unvisitedRadius),
       visitedRatio: number('stops.visitedRatio', d.stops.visitedRatio),
       popRadius: number('stops.popRadius', d.stops.popRadius),
-      icon: read(
-        'stops.icon',
-        d.stops.icon,
-        // Un emoji ou deux, pas un texte : il est dessiné en image sur la carte.
-        (value): value is string => typeof value === 'string' && value.length <= 16,
-        'emoji (16 unités UTF-16 au plus) ou vide',
-      ),
+      icon: emoji('stops.icon', d.stops.icon),
       iconSize: number('stops.iconSize', d.stops.iconSize),
       showImageOnMap: flag('stops.showImageOnMap', d.stops.showImageOnMap),
       imageSize: number('stops.imageSize', d.stops.imageSize),

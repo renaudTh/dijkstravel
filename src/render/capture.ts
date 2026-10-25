@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { rm, writeFile } from 'node:fs/promises';
 import { basename } from 'node:path';
-import { chromium, type BrowserContext } from 'playwright';
+import { chromium, type BrowserContext, type Page } from 'playwright';
 
 export class FfmpegError extends Error {
   readonly code: number | null;
@@ -39,6 +39,56 @@ export function chunks(frames: number, count: number): { readonly start: number;
   }));
 }
 
+/** Au-delà, une image est tenue pour bloquée (tuile jamais arrivée) : page rechargée, image refaite. */
+const FRAME_TIMEOUT_MS = 60_000;
+/** Essais d'une image, le premier compris, avant d'abandonner le rendu. */
+const FRAME_ATTEMPTS = 3;
+
+export class StuckFrameError extends Error {
+  readonly frame: number;
+
+  constructor(frame: number, pending: readonly string[]) {
+    super(
+      `Image ${String(frame)} bloquée après ${String(FRAME_ATTEMPTS)} essais (sources en attente : ${pending.join(', ') || 'aucune'})`,
+    );
+    this.frame = frame;
+  }
+}
+
+async function openPage(page: Page, pageUrl: string): Promise<void> {
+  await page.goto(pageUrl);
+  await page.waitForFunction(() => window.frameCount > 0, undefined, { timeout: 120_000 });
+}
+
+/**
+ * Dessine l'image `frame`. Une image qui ne se termine pas (une tuile jamais arrivée) ne doit pas figer
+ * tout le rendu : passé `FRAME_TIMEOUT_MS`, la page est rechargée (tuiles servies par le cache disque)
+ * et l'image refaite.
+ */
+async function renderFrameWithRetry(page: Page, pageUrl: string, frame: number): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => {
+        resolve('timeout');
+      }, FRAME_TIMEOUT_MS);
+    });
+    const drawn = page.evaluate((index) => window.renderFrame(index), frame);
+    const outcome = await Promise.race([drawn.then(() => 'drawn' as const), timedOut]).finally(() => {
+      clearTimeout(timer);
+    });
+    if (outcome === 'drawn') return;
+    // Rejetée au rechargement de la page : sans intérêt, l'image est refaite.
+    drawn.catch(() => undefined);
+    const pending = await page.evaluate(() => window.pendingSources()).catch(() => ['?']);
+    if (attempt === FRAME_ATTEMPTS) throw new StuckFrameError(frame, pending);
+    console.error(
+      `\nImage ${String(frame)} bloquée (sources en attente : ${pending.join(', ') || 'aucune'}) : page rechargée.`,
+    );
+    await openPage(page, pageUrl);
+  }
+}
+
 async function renderSegment(
   context: BrowserContext,
   options: { readonly pageUrl: string; readonly fps: number; readonly start: number; readonly end: number },
@@ -60,11 +110,10 @@ async function renderSegment(
     console.error(error);
   });
   try {
-    await page.goto(options.pageUrl);
-    await page.waitForFunction(() => window.frameCount > 0, undefined, { timeout: 120_000 });
+    await openPage(page, options.pageUrl);
     // Séquentiel dans une tranche : la page et ses tuiles en mémoire servent à l'image suivante.
     for (let frame = options.start; frame < options.end; frame++) {
-      await page.evaluate((index) => window.renderFrame(index), frame);
+      await renderFrameWithRetry(page, options.pageUrl, frame);
       const image = await page.screenshot({ type: 'jpeg', quality: 92 });
       if (!stdin.write(image)) await once(stdin, 'drain');
       onFrame();
@@ -74,6 +123,31 @@ async function renderSegment(
     await page.close();
   }
   await exited;
+}
+
+/**
+ * Une image du rendu en JPEG, sans la carte d'infos : la couverture d'une publication, sur laquelle
+ * l'auteur pose son propre titre. Navigateur à part (pas le profil des vidéos) : un rendu peut tourner
+ * en même temps.
+ */
+export async function captureCover(options: {
+  readonly pageUrl: string;
+  readonly size: { readonly width: number; readonly height: number };
+  readonly frame: number;
+  readonly outFile: string;
+}): Promise<void> {
+  const browser = await chromium.launch({
+    args: ['--use-angle=gl', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'],
+  });
+  try {
+    const page = await browser.newPage({ viewport: options.size, deviceScaleFactor: 1 });
+    await openPage(page, options.pageUrl);
+    await renderFrameWithRetry(page, options.pageUrl, options.frame);
+    await page.evaluate(() => document.getElementById('hud')?.remove());
+    await page.screenshot({ path: options.outFile, type: 'jpeg', quality: 92 });
+  } finally {
+    await browser.close();
+  }
 }
 
 /**

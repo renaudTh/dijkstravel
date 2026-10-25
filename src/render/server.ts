@@ -5,6 +5,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { basename, dirname, extname, join, normalize, sep } from 'node:path';
 import { writeJson } from '../files.ts';
 import { parseTheme } from '../theme.ts';
+import { DEFAULT_TILE_OPTIONS, parseTilePath, tileFetcher } from './tiles.ts';
 
 export type PageServer = {
   readonly url: string;
@@ -74,7 +75,8 @@ async function saveTheme(request: IncomingMessage, response: ServerResponse, the
  * Sert `src/render/index.html` (rendu) et `src/render/editor.html` (éditeur de thème), les modules `.ts`
  * du projet débarrassés de leurs types (`module.stripTypeScriptTypes`), maplibre-gl depuis node_modules,
  * le run, la tournée et le thème sous `/run.json`, `/tour.json` et `/theme.json`, et les images
- * des lieux (dossier `images/` à côté de la tournée) sous `/images.json` et `/images/<fichier>`.
+ * des lieux (dossier `images/` à côté de la tournée) sous `/images.json` et `/images/<fichier>`, et les
+ * tuiles d'imagerie sous `/imagery/<nom>/<z>/<x>/<y>` (cache `data/cache/tiles/`, voir `tileFetcher`).
  * `editable` : accepte `PUT /theme.json`, qui écrit le thème validé dans `files.theme`.
  */
 export function servePage(files: {
@@ -90,11 +92,18 @@ export function servePage(files: {
     '/tour.json': files.tour,
   };
   const imagesDir = join(dirname(files.tour), 'images');
+  const fetchTile = tileFetcher({ ...DEFAULT_TILE_OPTIONS, cacheDir: join(ROOT, 'data', 'cache', 'tiles') });
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
     const send = async (): Promise<void> => {
       if (pathname === '/theme.json' && request.method === 'PUT' && files.editable) {
         await saveTheme(request, response, files.theme);
+        return;
+      }
+      const tile = parseTilePath(pathname);
+      if (tile !== null) {
+        const { status, body, contentType } = await fetchTile(tile.imagery, tile.z, tile.x, tile.y);
+        response.writeHead(status, { 'content-type': contentType }).end(body);
         return;
       }
       if (pathname === '/images.json') {

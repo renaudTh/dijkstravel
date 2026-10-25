@@ -100,9 +100,13 @@ function vroomSolution(request: unknown): unknown {
   };
 }
 
-/** Faux OSRM + VROOM : distances haversine, aucune route vers ou depuis les points `unreachable`. */
-function fakeRouting(unreachable: readonly LonLat[] = []) {
+/**
+ * Faux OSRM + VROOM : distances haversine, aucune route vers ou depuis les points `unreachable`,
+ * et les points `snappedAway` projetés à 5 km sur le réseau.
+ */
+function fakeRouting(unreachable: readonly LonLat[] = [], snappedAway: readonly LonLat[] = []) {
   const isUnreachable = (point: LonLat) => unreachable.some((other) => isDeepStrictEqual(other, point));
+  const isSnappedAway = (point: LonLat) => snappedAway.some((other) => isDeepStrictEqual(other, point));
   return (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url.startsWith(VROOM_URL)) {
@@ -117,7 +121,8 @@ function fakeRouting(unreachable: readonly LonLat[] = []) {
           return isUnreachable(from) || isUnreachable(to) ? null : haversine(from, to);
         }),
       );
-      return jsonResponse({ code: 'Ok', distances });
+      const sources = locations.map((point) => ({ distance: isSnappedAway(point) ? 5000 : 3 }));
+      return jsonResponse({ code: 'Ok', distances, sources });
     }
     if (url.includes('/route/')) {
       const waypoints = coordinatesOf(url);
@@ -139,7 +144,7 @@ function fakeRouting(unreachable: readonly LonLat[] = []) {
 
 function loopRoute(meters: (length: number) => number): RoutedPath {
   const points: NonEmpty<LonLat> = [RENNES.at, BREST.at, VANNES.at, RENNES.at];
-  return { points, legSegments: [1, 1, 1], meters: meters(lengthOf(points)) };
+  return { points, legSegments: [1, 1, 1], ferrySegments: [], meters: meters(lengthOf(points)) };
 }
 
 describe('findUnreachable', () => {
@@ -230,11 +235,24 @@ describe('assembleTour', () => {
       run: run({ kind: 'coordinates', at: PLOERMEL }, 'open'),
       start: PLOERMEL,
       ordered: [RENNES, BREST, VANNES],
-      route: { points, legSegments: [2, 1, 3], meters: lengthOf(points) },
+      route: { points, legSegments: [2, 1, 3], ferrySegments: [], meters: lengthOf(points) },
       excluded: [],
     });
 
     assert.deepEqual(decreases(tour.stops.map((stop) => stop.meters)), []);
+  });
+
+  test('measures the ferry crossings along the path', () => {
+    const route = loopRoute((length) => length);
+    const tour = assembleTour({
+      run: run({ kind: 'free' }, 'loop'),
+      start: null,
+      ordered: [RENNES, BREST, VANNES],
+      route: { ...route, ferrySegments: [[1, 2]] },
+      excluded: [],
+    });
+
+    assert.deepEqual(tour.ferries, [[tour.path.meters[1], tour.path.meters[2]]]);
   });
 
   test('rejects a route whose geometry length differs from the OSRM distance by more than 1 %', () => {
@@ -311,6 +329,14 @@ describe('solveTour', () => {
     const tour = await solveTour(run({ kind: 'free' }, 'loop'), [RENNES, BREST, VANNES, SEIN], ENDPOINTS);
 
     assert.deepEqual(tour.stops.map((stop) => stop.id).toSorted(), ['a', 'b', 'c']);
+  });
+
+  test('excludes a place that OSRM snaps far away from it', async (t) => {
+    t.mock.method(globalThis, 'fetch', fakeRouting([], [SEIN.at]));
+
+    const tour = await solveTour(run({ kind: 'free' }, 'loop'), [RENNES, BREST, VANNES, SEIN], ENDPOINTS);
+
+    assert.deepEqual(tour.excluded, [{ id: 'sein', name: 'Île de Sein' }]);
   });
 
   test('rejects an unreachable start', async (t) => {

@@ -1,22 +1,24 @@
-import { spawnSync } from 'node:child_process';
 import { access, writeFile } from 'node:fs/promises';
 import { readJson } from '../files.ts';
+import { captureCover } from '../render/capture.ts';
 import { frameCount, timeline } from '../render/frame.ts';
-import { runPaths, runPublication } from '../run.ts';
+import { servePage } from '../render/server.ts';
+import { runPaths, runPublication, VIDEO_SIZES } from '../run.ts';
 import { parseTour } from '../solve/tour.ts';
-import { loadRun, usage } from './shared.ts';
+import { loadRun, loadThemeFile, usage } from './shared.ts';
 
 const km = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 
 /**
  * `node src/cli/publication.ts <run.json>` → `data/<run>/publication.txt` (légende prête à coller) et,
- * si la vidéo est rendue, `data/<run>/cover.jpg` (dernière image : tracé complet dézoomé).
+ * `data/<run>/cover.jpg` (dernière image, tracé complet dézoomé, sans la carte d'infos : place libre pour un titre).
  */
 export async function main(argv: readonly string[]): Promise<number> {
   const [runFile] = argv;
   if (runFile === undefined) return usage('publication <run.json>');
   const run = await loadRun(runFile);
-  if (run === null) return 1;
+  const theme = await loadThemeFile(runFile);
+  if (run === null || theme === null) return 1;
   const raw = await readJson(runFile);
   const publication = runPublication(raw);
   if (publication === null) {
@@ -35,23 +37,17 @@ export async function main(argv: readonly string[]): Promise<number> {
     () => false,
   );
   const cover = `${paths.dir}/cover.jpg`;
-  if (hasVideo) {
-    // Toute dernière image : fin de l'outro, tracé complet dézoomé et compteurs à leur total.
-    const seconds = (frameCount(timeline(run.video)) - 1) / run.video.fps;
-    spawnSync('ffmpeg', [
-      '-y',
-      '-loglevel',
-      'error',
-      '-ss',
-      String(seconds),
-      '-i',
-      paths.video,
-      '-frames:v',
-      '1',
-      '-q:v',
-      '2',
-      cover,
-    ]);
+  // Toute dernière image : fin de l'outro, tracé complet dézoomé ; dessinée par la page, sans la carte d'infos.
+  const server = await servePage({ run: runFile, tour: paths.tour, theme, editable: false });
+  try {
+    await captureCover({
+      pageUrl: server.url,
+      size: VIDEO_SIZES[run.video.format],
+      frame: frameCount(timeline(run.video)) - 1,
+      outFile: cover,
+    });
+  } finally {
+    await server.close();
   }
 
   const text = [
@@ -64,9 +60,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     '=== À PRÉPARER ===',
     '',
     hasVideo ? `Vidéo : ${paths.video}` : `Vidéo : pas encore rendue → npm run render -- ${runFile}`,
-    hasVideo
-      ? `Couverture : ${cover} (tracé complet dézoomé, à choisir comme miniature)`
-      : 'Couverture : générée après le rendu',
+    `Couverture : ${cover} (tracé complet dézoomé, sans la carte de titre, à choisir comme miniature)`,
     "Heure : en semaine vers 18 h - 21 h, ou le week-end vers midi (repère général : à ajuster d'après vos statistiques).",
     'Sources : la mention OpenStreetMap / imagerie est déjà dans la vidéo, rien à ajouter dans la légende.',
     '',

@@ -7,6 +7,12 @@ import { buildVroomRequest, parseVroomSolution, postVroom, type Departure } from
 
 export type Endpoints = { readonly osrmUrl: string; readonly vroomUrl: string };
 
+/**
+ * Au-delà, OSRM a projeté le lieu sur une route sans rapport (Camopi, sans route, accrochée à 86 km) :
+ * le lieu est traité comme inaccessible. Large pour un grand stade, dont le centre est loin de la rue.
+ */
+export const MAX_SNAP_METERS = 2000;
+
 export class UnknownStartPlaceError extends Error {
   readonly id: string;
 
@@ -50,8 +56,9 @@ export async function solveTour(run: Run, places: NonEmpty<Place>, endpoints: En
 
   const locations = places.map((place) => place.at);
   if (startAt !== null) locations.push(startAt);
-  const matrix = await fetchDistanceMatrix(endpoints.osrmUrl, locations);
-  const unreachable = new Set(findUnreachable(matrix));
+  const { matrix, snapMeters } = await fetchDistanceMatrix(endpoints.osrmUrl, locations);
+  const snappedAway = snapMeters.flatMap((meters, index) => (meters > MAX_SNAP_METERS ? [index] : []));
+  const unreachable = new Set([...findUnreachable(matrix), ...snappedAway]);
   const startIndex = startAt !== null ? places.length : startPlace === undefined ? -1 : places.indexOf(startPlace);
   if (unreachable.has(startIndex)) throw new StartUnreachableError(start);
 
@@ -83,7 +90,7 @@ export async function solveTour(run: Run, places: NonEmpty<Place>, endpoints: En
   const waypoints = routeWaypoints(startAt, ordered, mode);
   const route: RoutedPath =
     waypoints.length < 2
-      ? { points: waypoints, legSegments: [], meters: 0 }
+      ? { points: waypoints, legSegments: [], ferrySegments: [], meters: 0 }
       : await fetchRoute(endpoints.osrmUrl, waypoints);
   return assembleTour({ run, start: startAt, ordered, route, excluded });
 }
@@ -137,6 +144,7 @@ export function assembleTour(input: {
     path,
     stops,
     excluded,
+    ferries: route.ferrySegments.map(([from, to]) => [path.meters[from] ?? 0, path.meters[to] ?? length] as const),
     routedMeters: route.meters,
   };
 }

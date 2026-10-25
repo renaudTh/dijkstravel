@@ -9,7 +9,8 @@ describe('parseTheme', () => {
 
     assert.deepEqual(theme, {
       ok: true,
-      value: { ...DEFAULT_THEME, route: { ...DEFAULT_THEME.route, color: '#000000' } },
+      // Sans couleur de traversée, celle du trait.
+      value: { ...DEFAULT_THEME, route: { ...DEFAULT_THEME.route, color: '#000000', ferryColor: '#000000' } },
     });
   });
 

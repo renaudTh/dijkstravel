@@ -35,6 +35,10 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'range', path: 'route.coreBlurRatio', label: 'Flou du cœur', step: 0.01 },
       { kind: 'checkbox', path: 'route.stripes', label: 'Trois bandes (trait, cœur, bande droite)' },
       { kind: 'color', path: 'route.stripeColor', label: 'Couleur de la bande droite' },
+      { kind: 'color', path: 'route.ferryColor', label: 'Couleur des traversées (bac, pirogue)' },
+      { kind: 'range', path: 'route.headRadius', label: 'Rayon de la tête (0 : aucune)', step: 1 },
+      { kind: 'color', path: 'route.headColor', label: 'Couleur de la tête' },
+      { kind: 'text', path: 'route.headIcon', label: 'Emoji à la tête (⚽…), à la place du point' },
     ],
   },
   {

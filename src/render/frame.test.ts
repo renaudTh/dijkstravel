@@ -24,6 +24,7 @@ const TOUR: Tour = {
     { id: 'c', name: 'Charlie', at: [-1, 48], meters: 3000 },
   ],
   excluded: [],
+  ferries: [],
   routedMeters: 3000,
 };
 const LENGTH = 3000;

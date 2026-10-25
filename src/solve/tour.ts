@@ -20,6 +20,8 @@ export type Tour = {
   readonly path: MeasuredPath;
   readonly stops: readonly Stop[];
   readonly excluded: readonly ExcludedPlace[];
+  /** Traversées en bateau (bac, pirogue…) le long de `path`, en mètres `[début, fin]`, dans l'ordre. */
+  readonly ferries: readonly (readonly [number, number])[];
   /** Distance annoncée par OSRM, pour contrôler `path` (CA-26). */
   readonly routedMeters: number;
 };
@@ -35,7 +37,7 @@ export class InvalidTourError extends Error {
 
 export function parseTour(raw: unknown): Tour {
   if (!isRecord(raw)) throw new InvalidTourError('racine');
-  const { run, mode, start, path, stops, excluded, routedMeters } = raw;
+  const { run, mode, start, path, stops, excluded, ferries, routedMeters } = raw;
   if (!isNonEmptyString(run)) throw new InvalidTourError('run');
   if (mode !== 'loop' && mode !== 'open') throw new InvalidTourError('mode');
   if (!isLonLatArray(start)) throw new InvalidTourError('start');
@@ -47,6 +49,8 @@ export function parseTour(raw: unknown): Tour {
     path: parsePath(path),
     stops: arrayOf(stops, 'stops').map(parseStop),
     excluded: arrayOf(excluded, 'excluded').map(parseExcluded),
+    // Absent des tournées calculées avant les traversées : aucune.
+    ferries: ferries === undefined ? [] : arrayOf(ferries, 'ferries').map(parseFerry),
     routedMeters,
   };
 }
@@ -76,6 +80,14 @@ function parseStop(raw: unknown): Stop {
     throw new InvalidTourError('stop');
   }
   return { id, name, at, meters };
+}
+
+function parseFerry(raw: unknown): readonly [number, number] {
+  const bounds = arrayOf(raw, 'ferries');
+  const [from, to] = bounds;
+  if (bounds.length !== 2) throw new InvalidTourError('ferries');
+  if (!isFiniteNumber(from) || !isFiniteNumber(to) || to < from) throw new InvalidTourError('ferries');
+  return [from, to];
 }
 
 function parseExcluded(raw: unknown): ExcludedPlace {
