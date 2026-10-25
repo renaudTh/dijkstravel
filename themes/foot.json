@@ -4,7 +4,9 @@
     "coreColor": "#c6f432",
     "width": 14,
     "coreRatio": 0.35,
-    "coreBlurRatio": 0.5
+    "coreBlurRatio": 0.5,
+    "headRadius": 16,
+    "headIcon": "⚽"
   },
   "stops": {
     "unvisitedColor": "#9fb89a",
@@ -17,15 +19,15 @@
     "imageSize": 70
   },
   "basemap": {
-    "imagery": "nasa",
-    "brightness": 0.02,
-    "contrast": 0.2,
-    "saturation": -0.2,
+    "imagery": "sentinel",
+    "brightness": 0,
+    "contrast": 0.3,
+    "saturation": 0.15,
     "hillshade": 0.3,
     "borders": true,
     "borderColor": "#ffffff",
     "tintColor": "#06240f",
-    "tintOpacity": 0.25
+    "tintOpacity": 0.1
   },
   "hud": {
     "font": "Poppins",
@@ -39,5 +41,8 @@
     "pillTextColor": "#07160d",
     "showImage": true,
     "showCount": false
+  },
+  "camera": {
+    "stopSlowdown": 3
   }
 }
