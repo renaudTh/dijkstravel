@@ -1,0 +1,22 @@
+{
+  "name": "martinique-communes",
+  "title": "Toutes les communes de la Martinique en un seul trajet",
+  "bbox": {
+    "west": -61.3,
+    "south": 14.35,
+    "east": -60.75,
+    "north": 14.95
+  },
+  "mode": "loop",
+  "theme": "lagon",
+  "video": {
+    "format": "9:16",
+    "durationSec": 60,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Toutes les communes de la Martinique en un seul trajet 🌴\n{lieux} communes, {km} de route. Tu viens de laquelle ?",
+    "hashtags": ["#martinique", "#972", "#madinina", "#outremer", "#roadtrip", "#geographie"]
+  }
+}

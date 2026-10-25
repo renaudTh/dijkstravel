@@ -1,0 +1,22 @@
+{
+  "name": "reunion-communes",
+  "title": "Toutes les communes de La Réunion en un seul trajet",
+  "bbox": {
+    "west": 55.15,
+    "south": -21.45,
+    "east": 55.9,
+    "north": -20.8
+  },
+  "mode": "loop",
+  "theme": "lagon",
+  "video": {
+    "format": "9:16",
+    "durationSec": 60,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Toutes les communes de La Réunion en un seul trajet 🌴\n{lieux} communes, {km} de route. Tu viens de laquelle ?",
+    "hashtags": ["#reunion", "#974", "#iledelareunion", "#outremer", "#roadtrip", "#geographie"]
+  }
+}

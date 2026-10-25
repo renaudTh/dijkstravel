@@ -1,0 +1,22 @@
+{
+  "name": "laliga-stades",
+  "title": "Tous les stades de la Liga en un seul trajet",
+  "bbox": {
+    "west": -9.6,
+    "south": 35.9,
+    "east": 3.5,
+    "north": 44.0
+  },
+  "mode": "loop",
+  "video": {
+    "format": "9:16",
+    "durationSec": 60,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "theme": "foot",
+  "publication": {
+    "caption": "Tous les stades de la Liga en un seul trajet ⚽🇪🇸\n{lieux} stades, {km} de route. Lequel tu rêves de faire ?",
+    "hashtags": ["#laliga", "#football", "#stade", "#foot", "#roadtrip", "#espagne"]
+  }
+}
