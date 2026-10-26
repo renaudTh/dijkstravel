@@ -8,10 +8,10 @@ import {
   type StyleSpecification,
 } from 'maplibre-gl';
 import { decimate, pointAt, splitCrossings, totalMeters, type MeasuredPath } from '../geo.ts';
+import { IMAGERY_SOURCES } from '../imagery.ts';
 import { isRecord } from '../narrow.ts';
 import { parseRun, runTitle, type VideoSettings } from '../run.ts';
 import { parseTour, type Tour } from '../solve/tour.ts';
-import { IMAGERY_SOURCES } from '../imagery.ts';
 import { parseTheme, type Theme, type ThemeIssue } from '../theme.ts';
 import { cameraAt, frameCount, hudAt, momentAt, timeline, type Moment } from './frame.ts';
 
