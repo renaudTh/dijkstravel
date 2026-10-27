@@ -121,6 +121,7 @@ impl std::fmt::Display for Transition {
 impl std::error::Error for Transition {}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Job {
     pub id: JobId,
     pub run_id: RunId,
