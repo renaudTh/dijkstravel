@@ -4,6 +4,7 @@ pub mod atlas;
 pub mod borders;
 pub mod cache;
 pub mod color;
+pub mod download;
 pub mod frame;
 pub mod hillshade;
 pub mod hud;

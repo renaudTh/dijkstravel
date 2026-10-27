@@ -1,4 +1,4 @@
-//! Tuiles raster lues dans le cache disque que remplit Node (`src/render/tiles.ts`) : le moteur ne
+//! Tuiles raster lues dans le cache disque que remplit `download` avant le rendu : le moteur ne
 //! télécharge rien, une tuile absente (hors couverture) est simplement transparente.
 
 use std::path::PathBuf;
