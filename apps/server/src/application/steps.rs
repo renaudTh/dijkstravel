@@ -200,7 +200,8 @@ impl Studio {
     ) -> anyhow::Result<()> {
         let scene = self.scene(production, context).await?;
         let theme = self.theme(&production.run).await?;
-        let out = context.scratch.join(ArtifactKind::Video.file_name());
+        let kind = ArtifactKind::rendered(seconds);
+        let out = context.scratch.join(kind.file_name());
         let (threads, monitor, file) = (self.settings.render_threads, context.monitor(Step::Render), out.clone());
         blocking(move || {
             let renderer = scene.renderer(theme, None).map_err(|e| anyhow!(e))?;
@@ -212,12 +213,12 @@ impl Studio {
         if context.cancel.load(Ordering::Relaxed) {
             bail!(dijkstravel_render::monitor::CANCELLED);
         }
-        let bytes = self.store.put_file(&ArtifactKind::Video.key(production.id), &out).await?;
+        let bytes = self.store.put_file(&kind.key(production.id), &out).await?;
         let meta = json!({ "seconds": seconds });
         self.catalog
             .record_artifact(
                 production.id,
-                &artifact(ArtifactKind::Video, production.id, bytes, meta),
+                &artifact(kind, production.id, bytes, meta),
                 Some(context.job),
             )
             .await

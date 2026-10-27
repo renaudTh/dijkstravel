@@ -1,7 +1,8 @@
 import { Clipboard } from '@angular/cdk/clipboard';
 import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
+import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { MatListModule } from '@angular/material/list';
@@ -25,6 +26,7 @@ const FILE_LABELS: Record<Artifact['kind'], string> = {
   places: 'Lieux (places.geojson)',
   tour: 'Tournée (tour.json)',
   video: 'Vidéo (video.mp4)',
+  preview: 'Aperçu (preview.mp4)',
   cover: 'Couverture (cover.jpg)',
   publication: 'Légende (publication.txt)',
 };
@@ -36,6 +38,7 @@ const FILE_LABELS: Record<Artifact['kind'], string> = {
     DecimalPipe,
     JobPanel,
     MatButtonModule,
+    MatButtonToggleModule,
     MatCardModule,
     MatIconModule,
     MatListModule,
@@ -79,6 +82,17 @@ const FILE_LABELS: Record<Artifact['kind'], string> = {
 
       <div class="layout">
         <section class="media">
+          @if (hasVideo() && hasPreview()) {
+            <mat-button-toggle-group
+              hideSingleSelectionIndicator
+              aria-label="Vidéo affichée"
+              [value]="shown()"
+              (change)="shown.set($event.value)"
+            >
+              <mat-button-toggle value="video">Vidéo</mat-button-toggle>
+              <mat-button-toggle value="preview">Aperçu</mat-button-toggle>
+            </mat-button-toggle-group>
+          }
           @if (videoUrl(); as src) {
             <video [src]="src" controls preload="metadata" [class.portrait]="run.format === '9:16'"></video>
           } @else {
@@ -158,6 +172,8 @@ const FILE_LABELS: Record<Artifact['kind'], string> = {
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); align-items: start; }
     @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+    .media { display: grid; gap: 8px; }
+    .media mat-button-toggle-group { justify-self: center; }
     .media video { width: 100%; max-height: 78vh; background: #000; border-radius: 12px; display: block; }
     .media video.portrait { width: auto; max-width: 100%; margin-inline: auto; }
     .empty { display: grid; place-items: center; gap: 8px; padding: 48px 16px; border-radius: 12px; text-align: center;
@@ -199,9 +215,18 @@ export class RunPage {
     return file ? `${file.bytes}-${this.currentJob()?.finishedAt ?? ''}` : null;
   }
 
+  protected readonly hasVideo = computed(() => this.version('video') !== null);
+  protected readonly hasPreview = computed(() => this.version('preview') !== null);
+  /** La vidéo complète par défaut, l'aperçu juste après en avoir rendu un ; à défaut, celle qui existe. */
+  protected readonly shown = linkedSignal<'video' | 'preview'>(() => {
+    const kind = this.currentJob()?.kind;
+    const preview = kind?.kind === 'render' && kind.seconds != null;
+    return (preview && this.hasPreview()) || !this.hasVideo() ? 'preview' : 'video';
+  });
   protected readonly videoUrl = computed(() => {
-    const version = this.version('video');
-    return version ? fileUrl(this.run()!.name, 'video', version) : null;
+    const kind = this.shown();
+    const version = this.version(kind);
+    return version ? fileUrl(this.run()!.name, kind, version) : null;
   });
   protected readonly coverUrl = computed(() => {
     const version = this.version('cover');

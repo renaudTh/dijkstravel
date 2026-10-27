@@ -1,6 +1,6 @@
 /** Les vues renvoyées par l'API du studio (`apps/server/src/application/queries.rs`). */
 
-export type ArtifactKind = 'places' | 'tour' | 'video' | 'cover' | 'publication';
+export type ArtifactKind = 'places' | 'tour' | 'video' | 'preview' | 'cover' | 'publication';
 export type Profile = 'car' | 'foot' | 'train';
 export type Step = 'source' | 'solve' | 'render' | 'publication';
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -8,7 +8,7 @@ export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancell
 export type JobKind =
   | { kind: 'source' }
   | { kind: 'solve' }
-  | { kind: 'render'; seconds?: number }
+  | { kind: 'render'; seconds?: number | null }
   | { kind: 'publication' }
   | { kind: 'all' };
 

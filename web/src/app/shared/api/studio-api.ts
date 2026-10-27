@@ -8,6 +8,7 @@ const FILE_NAMES: Record<ArtifactKind, string> = {
   places: 'places.geojson',
   tour: 'tour.json',
   video: 'video.mp4',
+  preview: 'preview.mp4',
   cover: 'cover.jpg',
   publication: 'publication.txt',
 };

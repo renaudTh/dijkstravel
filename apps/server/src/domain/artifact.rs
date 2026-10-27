@@ -10,19 +10,28 @@ pub enum ArtifactKind {
     Places,
     Tour,
     Video,
+    /// Le début seul de la vidéo, pour juger vite d'un thème : il ne remplace jamais la vidéo complète.
+    Preview,
     Cover,
     Publication,
 }
 
 impl ArtifactKind {
-    pub const ALL: [ArtifactKind; 5] =
-        [ArtifactKind::Places, ArtifactKind::Tour, ArtifactKind::Video, ArtifactKind::Cover, ArtifactKind::Publication];
+    pub const ALL: [ArtifactKind; 6] = [
+        ArtifactKind::Places,
+        ArtifactKind::Tour,
+        ArtifactKind::Video,
+        ArtifactKind::Preview,
+        ArtifactKind::Cover,
+        ArtifactKind::Publication,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
             ArtifactKind::Places => "places",
             ArtifactKind::Tour => "tour",
             ArtifactKind::Video => "video",
+            ArtifactKind::Preview => "preview",
             ArtifactKind::Cover => "cover",
             ArtifactKind::Publication => "publication",
         }
@@ -38,6 +47,7 @@ impl ArtifactKind {
             ArtifactKind::Places => "places.geojson",
             ArtifactKind::Tour => "tour.json",
             ArtifactKind::Video => "video.mp4",
+            ArtifactKind::Preview => "preview.mp4",
             ArtifactKind::Cover => "cover.jpg",
             ArtifactKind::Publication => "publication.txt",
         }
@@ -51,10 +61,15 @@ impl ArtifactKind {
         match self {
             ArtifactKind::Places => "application/geo+json",
             ArtifactKind::Tour => "application/json",
-            ArtifactKind::Video => "video/mp4",
+            ArtifactKind::Video | ArtifactKind::Preview => "video/mp4",
             ArtifactKind::Cover => "image/jpeg",
             ArtifactKind::Publication => "text/plain; charset=utf-8",
         }
+    }
+
+    /// La vidéo que rend un job `render` : l'aperçu s'il n'en demande que le début.
+    pub fn rendered(seconds: Option<f64>) -> ArtifactKind {
+        if seconds.is_some() { ArtifactKind::Preview } else { ArtifactKind::Video }
     }
 
     /// Les entrées du run (`places`, `tour`) à la racine du run, ce qui s'en déduit sous `out/`.
@@ -73,4 +88,18 @@ pub struct Artifact {
     pub bytes: u64,
     /// Résumé lisible sans ouvrir le fichier : `{ "places": n }`, `{ "stops": n, "meters": m }`.
     pub meta: serde_json::Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_preview_keeps_its_own_file() {
+        assert_eq!(ArtifactKind::rendered(None), ArtifactKind::Video);
+        assert_eq!(ArtifactKind::rendered(Some(10.0)), ArtifactKind::Preview);
+        let run = RunId(uuid::Uuid::nil());
+        assert_ne!(ArtifactKind::Preview.key(run), ArtifactKind::Video.key(run));
+        assert_eq!(ArtifactKind::from_file_name("preview.mp4"), Some(ArtifactKind::Preview));
+    }
 }
