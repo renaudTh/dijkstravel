@@ -1,14 +1,14 @@
 //! `dijkstravel source <csv | overpass | atp> runs/<nom> …` → `runs/<nom>/places.geojson`, validé.
+//! Seul lecteur de `OVERPASS_URL` (instance publique par défaut).
 
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use dijkstravel_core::json::to_js_string;
-use dijkstravel_core::places::{Place, parse_places, to_places_file};
-use dijkstravel_core::run::{Run, RunPaths};
-use dijkstravel_sources::{atp, csv, overpass};
+use dijkstravel_core::places::Place;
+use dijkstravel_core::run::Run;
+use dijkstravel_sources::{atp, csv, finalize, overpass};
 
-use crate::load::{self, Failure, Outcome, fail};
+use crate::load::{self, Failure, Outcome, RunPaths, fail};
 
 #[derive(Subcommand)]
 pub enum Source {
@@ -28,9 +28,8 @@ pub enum Source {
 
 /// Écrit les lieux après la même validation que `validate`.
 fn write(run: &Run, paths: &RunPaths, places: &[Place], detail: &str) -> Outcome {
-    let text = to_js_string(&to_places_file(places));
-    let validated =
-        parse_places(&text, &run.bbox).map_err(|issues| Failure(issues.iter().map(ToString::to_string).collect()))?;
+    let (text, validated) =
+        finalize(places, &run.bbox).map_err(|issues| Failure(issues.iter().map(ToString::to_string).collect()))?;
     load::write_file(&paths.places, text)?;
     println!("{} : {} lieux{detail}.", paths.places.display(), validated.len());
     Ok(())
@@ -49,14 +48,14 @@ pub fn main(source: Source) -> Outcome {
             let Some(source) = &run.overpass else {
                 return fail(format!("{} : aucune section overpass.", paths.file.display()));
             };
-            let elements = overpass::parse_response(&overpass::fetch(&overpass::build_query(source, &run.bbox))?)?;
-            let found = overpass::places_from_elements(&elements);
+            let url = std::env::var("OVERPASS_URL").unwrap_or_else(|_| overpass::OVERPASS_URL.to_owned());
+            let elements =
+                overpass::parse_response(&overpass::fetch(&url, &overpass::build_query(source, &run.bbox))?)?;
+            let found = overpass::places_from_elements(&elements).within(&run.bbox);
             if !found.unnamed.is_empty() {
                 eprintln!("{} lieux sans nom écartés : {}", found.unnamed.len(), found.unnamed.join(", "));
             }
-            // Un polygone qui chevauche la zone peut avoir son centre en dehors.
-            let inside: Vec<Place> = found.places.into_iter().filter(|place| run.bbox.contains(place.at)).collect();
-            write(&run, &paths, &inside, &format!(" ({} éléments OSM)", elements.len()))
+            write(&run, &paths, &found.places, &format!(" ({} éléments OSM)", elements.len()))
         }
         Source::Atp { run: arg, collector, types } => atp_source(&arg, &collector, types.as_deref()),
     }

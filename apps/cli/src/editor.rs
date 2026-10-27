@@ -9,13 +9,12 @@ use std::path::{Path, PathBuf};
 use dijkstravel_core::Issue;
 use dijkstravel_core::json::{field, to_js_string};
 use dijkstravel_core::theme::{HUD_FONTS, IMAGERIES, NUMBER_RANGES, Theme};
-use dijkstravel_render::frame::Timeline;
-use dijkstravel_render::render::{Renderer, encode};
+use dijkstravel_render::preview::Previewer;
+use dijkstravel_render::render::encode;
 use serde_json::{Map, Value, json};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::load::{self, Outcome, fail};
-use crate::render::Scene;
 
 const PAGE_DIR: &str = "editor";
 /// Un thème (ou une demande d'aperçu) ne pèse que quelques centaines d'octets : tout corps plus gros est refusé.
@@ -50,10 +49,8 @@ fn read_body(request: &mut Request) -> Option<Value> {
 }
 
 struct Editor {
-    scene: Scene,
+    previewer: Previewer,
     theme_file: PathBuf,
-    /// Le dernier rendu, gardé tant que le thème ne change pas ; sinon son atlas resservira au suivant.
-    current: Option<(Theme, Renderer)>,
 }
 
 impl Editor {
@@ -65,10 +62,11 @@ impl Editor {
         };
         let ranges: Map<String, Value> =
             NUMBER_RANGES.iter().map(|&(path, min, max)| (path.to_owned(), json!([min, max]))).collect();
-        let (width, height) = self.scene.run.video.format.size();
-        let frames = Timeline::new(&self.scene.video()).frame_count();
+        let scene = &self.previewer.scene;
+        let (width, height) = scene.run.video.format.size();
+        let frames = scene.frame_count();
         Ok(json!({
-            "run": { "name": self.scene.run.name, "width": width, "height": height, "frames": frames },
+            "run": { "name": scene.run.name, "width": width, "height": height, "frames": frames },
             "theme": theme,
             "issues": issues.iter().map(|issue| json!({ "path": issue.path, "expected": issue.expected })).collect::<Vec<_>>(),
             "defaults": Theme::default(),
@@ -87,9 +85,7 @@ impl Editor {
             (Err(issues), _) => return Ok(issues_reply(&issues)),
             (Ok(_), None) => return Ok(issues_reply(&[Issue::new("frame", "entier >= 0")])),
         };
-        let renderer = renderer_for(&mut self.current, &self.scene, &theme)?;
-        self.scene.downloader.fetch_tiles(&renderer.needed_tiles(frame..frame + 1), false)?;
-        let image = renderer.render(frame.min(renderer.frame_count().saturating_sub(1)), true);
+        let image = self.previewer.frame(&theme, frame)?;
         // JPEG : bien plus rapide à encoder qu'un PNG de cette taille, sans différence visible à l'écran.
         let bytes = encode(&image, "preview.jpg").ok_or("encodage impossible")?;
         Ok(reply(200, "image/jpeg", bytes))
@@ -127,27 +123,16 @@ impl Editor {
     }
 }
 
-/// Le rendu de `theme`, refait seulement si le thème a changé ; la tournée et l'atlas (morceaux déjà
-/// calculés compris) passent d'un rendu au suivant tant qu'ils ne dépendent d'aucun réglage changé.
-fn renderer_for<'a>(current: &'a mut Option<(Theme, Renderer)>, scene: &Scene, theme: &Theme) -> Outcome<&'a Renderer> {
-    if current.as_ref().is_none_or(|(known, _)| known != theme) {
-        let previous = current.take().map(|(_, renderer)| renderer);
-        let renderer = Renderer::new(scene.input(theme.clone())?, scene.tour.clone(), previous.as_ref());
-        *current = Some((theme.clone(), renderer));
-    }
-    Ok(&current.as_ref().expect("rendu chargé").1)
-}
-
 pub fn main(arg: &Path) -> Outcome {
     if !Path::new(PAGE_DIR).join("dist/editor.js").exists() {
         return fail("editor/dist/editor.js absent : npm run build:editor");
     }
-    let scene = Scene::load(arg)?;
+    let (scene, _) = crate::render::scene(arg)?;
     let theme_file = load::theme_file(&scene.run);
     let server = Server::http("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = server.server_addr().to_ip().map_or(0, |address| address.port());
     println!("Éditeur : http://127.0.0.1:{port}/editor  (thème {}, Ctrl+C pour arrêter)", theme_file.display());
-    let mut editor = Editor { scene, theme_file, current: None };
+    let mut editor = Editor { previewer: Previewer::new(scene), theme_file };
     for mut request in server.incoming_requests() {
         let response = editor.handle(&mut request).unwrap_or_else(|load::Failure(messages)| {
             let message = messages.join("\n");

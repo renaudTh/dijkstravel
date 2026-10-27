@@ -1,8 +1,10 @@
-//! Le modèle partagé par toutes les commandes : run, lieux, thème, tournée et leur géométrie.
+//! Noyau partagé du domaine : run, lieux, thème, tournée, publication et leur géométrie. Aucune
+//! entrée-sortie : les apps chargent, ce noyau valide et calcule.
 
 pub mod geo;
 pub mod json;
 pub mod places;
+pub mod publication;
 pub mod run;
 pub mod theme;
 pub mod tour;

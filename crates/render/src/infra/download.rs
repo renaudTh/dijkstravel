@@ -3,7 +3,6 @@
 //! moteur ne fait ensuite aucune requête, et les rendus suivants n'interrogent plus les fournisseurs.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,6 +11,7 @@ use std::time::Duration;
 use dijkstravel_core::places::Place;
 
 use crate::model::{ImagerySource, TileSource};
+use crate::monitor::{CANCELLED, Monitor, Stage};
 
 const USER_AGENT: &str = "dijkstravel/0.1 (outil personnel de cartographie)";
 /// Essais par tuile, le premier compris ; attente avant le deuxième, doublée à chaque suivant.
@@ -75,6 +75,15 @@ pub fn terrain_source() -> TileSource {
 
 pub fn vector_source() -> TileSource {
     TileSource { name: VECTOR.0.to_owned(), maxzoom: VECTOR.2 }
+}
+
+/// Images des lieux dans le cache.
+#[derive(Debug, Default)]
+pub struct PlaceImages {
+    /// Identifiant du lieu → fichier.
+    pub files: HashMap<String, String>,
+    /// Lieux dont l'image est introuvable : identifiant, adresse.
+    pub missing: Vec<(String, String)>,
 }
 
 pub struct Downloader {
@@ -154,24 +163,25 @@ impl Downloader {
 
     /// Tuiles `<source>/<z>/<x>/<y>` absentes du cache, téléchargées ; une tuile introuvable (hors
     /// couverture) reste absente et se dessine transparente.
-    pub fn fetch_tiles(&self, tiles: &[String], progress: bool) -> Result<(), String> {
+    pub fn fetch_tiles(&self, tiles: &[String], monitor: &dyn Monitor) -> Result<(), String> {
         let dir = self.tile_dir();
         let missing: Vec<&String> = tiles.iter().filter(|tile| !dir.join(tile).exists()).collect();
+        let total = tiles.len() as u64;
         let next = AtomicUsize::new(0);
         let done = AtomicUsize::new(tiles.len() - missing.len());
-        let report = |done: usize| {
-            if progress && done.is_multiple_of(50) && done < tiles.len() {
-                print!("\rtuiles {done} / {}", tiles.len());
-                let _ = std::io::stdout().flush();
-            }
-        };
         let errors: Vec<String> = std::thread::scope(|scope| {
             let workers: Vec<_> = (0..CONCURRENCY)
                 .map(|_| {
                     scope.spawn(|| -> Result<(), String> {
                         while let Some(tile) = missing.get(next.fetch_add(1, Ordering::Relaxed)) {
+                            if monitor.cancelled() {
+                                return Err(CANCELLED.to_owned());
+                            }
                             self.fetch_tile(tile, &dir)?;
-                            report(done.fetch_add(1, Ordering::Relaxed) + 1);
+                            let done = done.fetch_add(1, Ordering::Relaxed) as u64 + 1;
+                            if done < total {
+                                monitor.progress(Stage::Tiles, done, total);
+                            }
                         }
                         Ok(())
                     })
@@ -179,10 +189,11 @@ impl Downloader {
                 .collect();
             workers.into_iter().filter_map(|worker| worker.join().expect("téléchargement").err()).collect()
         });
-        if progress && !tiles.is_empty() {
-            println!("\rtuiles {0} / {0}", tiles.len());
+        if let Some(error) = errors.into_iter().next() {
+            return Err(error);
         }
-        errors.into_iter().next().map_or(Ok(()), Err)
+        monitor.progress(Stage::Tiles, total, total);
+        Ok(())
     }
 
     fn fetch_tile(&self, tile: &str, dir: &Path) -> Result<(), String> {
@@ -225,19 +236,19 @@ impl Downloader {
         self.get(ttf_url, &[]).ok().is_some_and(|body| write_atomically(file, &body).is_ok())
     }
 
-    /// Images des lieux (`image` dans `places.geojson`), une fois dans `data/cache/images/` : identifiant
-    /// du lieu → fichier. Une image introuvable est signalée et le lieu reste sans.
-    pub fn place_images(&self, places: &[Place]) -> HashMap<String, String> {
+    /// Images des lieux (`image` dans `places.geojson`), une fois dans `data/cache/images/`. Une image
+    /// introuvable est rapportée dans `missing` et le lieu reste sans.
+    pub fn place_images(&self, places: &[Place]) -> PlaceImages {
         let dir = self.cache_dir.join("images");
-        let mut images = HashMap::new();
+        let mut images = PlaceImages::default();
         // Séquentiel : upload.wikimedia.org répond 429 aux rafales.
         for place in places {
             let Some(url) = &place.image else { continue };
             match self.cached_image(url, &dir) {
                 Some(file) => {
-                    images.insert(place.id.clone(), file.display().to_string());
+                    images.files.insert(place.id.clone(), file.display().to_string());
                 }
-                None => eprintln!("Image introuvable pour {} : {url}", place.id),
+                None => images.missing.push((place.id.clone(), url.clone())),
             }
         }
         images
@@ -273,12 +284,15 @@ impl Downloader {
     }
 }
 
-/// Écrite à côté puis renommée : un rendu concurrent ne lit jamais un fichier à moitié écrit.
+/// Écrite à côté puis renommée : un rendu concurrent ne lit jamais un fichier à moitié écrit. Le nom
+/// provisoire porte le processus et un compteur : deux rendus d'un même serveur ne s'y croisent pas.
 fn write_atomically(file: &Path, body: &[u8]) -> Result<(), String> {
+    static PARTS: AtomicUsize = AtomicUsize::new(0);
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{} : {e}", dir.display()))?;
     }
-    let partial = PathBuf::from(format!("{}.{}.part", file.display(), std::process::id()));
+    let part = PARTS.fetch_add(1, Ordering::Relaxed);
+    let partial = PathBuf::from(format!("{}.{}-{part}.part", file.display(), std::process::id()));
     std::fs::write(&partial, body).map_err(|e| format!("{} : {e}", partial.display()))?;
     std::fs::rename(&partial, file).map_err(|e| format!("{} : {e}", file.display()))
 }

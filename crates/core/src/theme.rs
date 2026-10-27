@@ -334,10 +334,6 @@ pub fn is_theme_name(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-pub fn theme_path(name: &str) -> String {
-    format!("themes/{name}.json")
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;

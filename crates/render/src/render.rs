@@ -3,7 +3,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use skia_safe::{Canvas, EncodedImageFormat, Image, Rect, Surface, surfaces};
+/// Une image rendue, à encoder par `encode`.
+pub use skia_safe::Image;
+use skia_safe::{Canvas, EncodedImageFormat, Rect, Surface, surfaces};
 
 use crate::atlas::Atlas;
 use crate::frame::{Animation, Moment};

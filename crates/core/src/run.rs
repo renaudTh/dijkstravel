@@ -1,8 +1,6 @@
-//! Un run : `runs/<nom>/run.json`, à côté de ses lieux (`places.geojson`) et de sa tournée (`tour.json`),
-//! tous versionnés. Le run porte toute son information, provenance des lieux comprise : les scripts qui
-//! les ont produits sont jetables.
-
-use std::path::{Path, PathBuf};
+//! Un run : la description d'une vidéo (zone, provenance des lieux, tournée voulue, format, thème). Le
+//! run porte toute son information, provenance des lieux comprise : les scripts qui les ont produits
+//! sont jetables. Où il est rangé (fichiers, base) regarde l'app qui le lit.
 
 use serde_json::Value;
 
@@ -107,40 +105,6 @@ pub struct Run {
     pub video: VideoSettings,
     pub overpass: Option<OverpassSource>,
     pub publication: Option<Publication>,
-}
-
-/// `dir` : le run versionné ; `out` : ce qui s'en déduit (vidéo, couverture…), hors dépôt.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RunPaths {
-    pub file: PathBuf,
-    pub dir: PathBuf,
-    pub places: PathBuf,
-    pub tour: PathBuf,
-    pub out: PathBuf,
-    pub video: PathBuf,
-}
-
-impl RunPaths {
-    /// `runs/<nom>` ou `runs/<nom>/run.json` ; les sorties vont dans `<racine>/data/out/<nom>`, la racine
-    /// étant le dossier courant.
-    pub fn of(arg: impl AsRef<Path>, name: &str) -> RunPaths {
-        let arg = arg.as_ref();
-        let file = if arg.extension().is_some_and(|ext| ext == "json") { arg.to_owned() } else { arg.join("run.json") };
-        let dir = file.parent().map_or_else(PathBuf::new, Path::to_owned);
-        let out = Path::new("data/out").join(name);
-        RunPaths {
-            places: dir.join("places.geojson"),
-            tour: dir.join("tour.json"),
-            video: out.join("video.mp4"),
-            file,
-            dir,
-            out,
-        }
-    }
-}
-
-pub fn run_file(arg: impl AsRef<Path>) -> PathBuf {
-    RunPaths::of(arg, "").file
 }
 
 impl Run {
@@ -390,15 +354,6 @@ mod tests {
         assert_eq!(issue_paths(&with("source", bad_kind)), ["source"]);
         let bad_date = json!({ "kind": "csv", "description": "x", "date": "27/10/2026", "licence": "CC0" });
         assert_eq!(issue_paths(&with("source", bad_date)), ["source"]);
-    }
-
-    #[test]
-    fn locates_files_from_the_run_folder() {
-        let from_dir = RunPaths::of("runs/bretagne", "bretagne");
-        assert_eq!(from_dir, RunPaths::of("runs/bretagne/run.json", "bretagne"));
-        assert_eq!(from_dir.places, Path::new("runs/bretagne/places.geojson"));
-        assert_eq!(from_dir.tour, Path::new("runs/bretagne/tour.json"));
-        assert_eq!(from_dir.video, Path::new("data/out/bretagne/video.mp4"));
     }
 
     #[test]

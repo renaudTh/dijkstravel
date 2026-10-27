@@ -1,5 +1,6 @@
 //! `dijkstravel <commande> runs/<nom>` : toute la chaîne, des lieux à la vidéo publiée.
 
+mod console;
 mod editor;
 mod load;
 mod publication;

@@ -9,12 +9,20 @@ use std::sync::{Condvar, Mutex, mpsc};
 
 use skia_safe::ColorType;
 
+use crate::monitor::{CANCELLED, Monitor, Stage};
 use crate::render::Renderer;
 
 /// Images rendues d'avance par thread au plus : borne la mémoire quand une image tarde.
 const AHEAD_PER_THREAD: u32 = 2;
 
-pub fn encode_video(renderer: &Renderer, frames: u32, threads: usize, out: &str) -> Result<(), String> {
+/// Les `frames` premières images, encodées dans `out` (MP4 H.264).
+pub fn encode_video(
+    renderer: &Renderer,
+    frames: u32,
+    threads: usize,
+    out: &str,
+    monitor: &dyn Monitor,
+) -> Result<(), String> {
     let (width, height) = (renderer.input.video.width, renderer.input.video.height);
     let fps = renderer.input.video.fps;
     let mut ffmpeg = Command::new("ffmpeg")
@@ -41,7 +49,7 @@ pub fn encode_video(renderer: &Renderer, frames: u32, threads: usize, out: &str)
                 let mut surface = renderer.surface();
                 loop {
                     let frame = next.fetch_add(1, Ordering::SeqCst);
-                    if frame >= frames {
+                    if frame >= frames || monitor.cancelled() {
                         break;
                     }
                     {
@@ -77,20 +85,23 @@ pub fn encode_video(renderer: &Renderer, frames: u32, threads: usize, out: &str)
                 let (count, changed) = &written;
                 *count.lock().unwrap() = done;
                 changed.notify_all();
-                if done.is_multiple_of(fps) || done == frames {
-                    eprint!("\rimage {done} / {frames}");
+                if done < frames {
+                    monitor.progress(Stage::Frames, u64::from(done), u64::from(frames));
                 }
             }
         }
-        eprintln!();
         Ok::<(), String>(())
     });
     drop(stdin);
     let status = ffmpeg.wait().map_err(|e| format!("ffmpeg : {e}"))?;
     result?;
+    if monitor.cancelled() {
+        return Err(CANCELLED.to_owned());
+    }
     if !status.success() {
         return Err(format!("ffmpeg a échoué ({status})"));
     }
+    monitor.progress(Stage::Frames, u64::from(frames), u64::from(frames));
     Ok(())
 }
 

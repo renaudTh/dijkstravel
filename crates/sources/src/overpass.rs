@@ -82,8 +82,17 @@ pub fn places_from_elements(elements: &[Element]) -> OverpassPlaces {
     result
 }
 
-pub fn fetch(query: &str) -> Result<Value, String> {
-    let mut response = ureq::post(OVERPASS_URL)
+impl OverpassPlaces {
+    /// Les seuls lieux dans `bbox` : un polygone qui chevauche la zone peut avoir son centre en dehors.
+    pub fn within(mut self, bbox: &BBox) -> Self {
+        self.places.retain(|place| bbox.contains(place.at));
+        self
+    }
+}
+
+/// `url` : `OVERPASS_URL` ou une instance à soi.
+pub fn fetch(url: &str, query: &str) -> Result<Value, String> {
+    let mut response = ureq::post(url)
         .header("user-agent", "dijkstravel")
         .send_form([("data", query)])
         .map_err(|e| format!("Overpass : {e}"))?;

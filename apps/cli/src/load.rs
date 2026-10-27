@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use dijkstravel_core::places::{Place, parse_places};
-use dijkstravel_core::run::{Run, RunPaths, run_file};
-use dijkstravel_core::theme::{Theme, theme_path};
+use dijkstravel_core::run::Run;
+use dijkstravel_core::theme::Theme;
 use dijkstravel_core::tour::Tour;
 use serde_json::Value;
 
@@ -42,6 +42,40 @@ pub fn write_file(file: &Path, contents: impl AsRef<[u8]>) -> Outcome {
     Ok(())
 }
 
+/// `dir` : le run versionné ; `out` : ce qui s'en déduit (vidéo, couverture…), hors dépôt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunPaths {
+    pub file: PathBuf,
+    pub dir: PathBuf,
+    pub places: PathBuf,
+    pub tour: PathBuf,
+    pub out: PathBuf,
+    pub video: PathBuf,
+}
+
+impl RunPaths {
+    /// `runs/<nom>` ou `runs/<nom>/run.json` ; les sorties vont dans `<racine>/data/out/<nom>`, la racine
+    /// étant le dossier courant.
+    pub fn of(arg: impl AsRef<Path>, name: &str) -> RunPaths {
+        let arg = arg.as_ref();
+        let file = if arg.extension().is_some_and(|ext| ext == "json") { arg.to_owned() } else { arg.join("run.json") };
+        let dir = file.parent().map_or_else(PathBuf::new, Path::to_owned);
+        let out = Path::new("data/out").join(name);
+        RunPaths {
+            places: dir.join("places.geojson"),
+            tour: dir.join("tour.json"),
+            video: out.join("video.mp4"),
+            file,
+            dir,
+            out,
+        }
+    }
+}
+
+pub fn run_file(arg: impl AsRef<Path>) -> PathBuf {
+    RunPaths::of(arg, "").file
+}
+
 /// `runs/<nom>` ou `runs/<nom>/run.json`.
 pub fn run(arg: &Path) -> Outcome<(Run, RunPaths)> {
     let file = run_file(arg);
@@ -63,7 +97,7 @@ pub fn tour(paths: &RunPaths) -> Outcome<Tour> {
 
 /// Fichier du thème du run ; absent, le thème par défaut.
 pub fn theme_file(run: &Run) -> PathBuf {
-    PathBuf::from(theme_path(&run.theme))
+    PathBuf::from(format!("themes/{}.json", run.theme))
 }
 
 pub fn theme(run: &Run) -> Outcome<Theme> {
@@ -71,4 +105,18 @@ pub fn theme(run: &Run) -> Outcome<Theme> {
     let raw = if file.exists() { read_json(&file)? } else { Value::Object(serde_json::Map::new()) };
     Theme::parse(&raw)
         .map_err(|issues| Failure(issues.iter().map(|issue| format!("{} : {issue}", file.display())).collect()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locates_files_from_the_run_folder() {
+        let from_dir = RunPaths::of("runs/bretagne", "bretagne");
+        assert_eq!(from_dir, RunPaths::of("runs/bretagne/run.json", "bretagne"));
+        assert_eq!(from_dir.places, Path::new("runs/bretagne/places.geojson"));
+        assert_eq!(from_dir.tour, Path::new("runs/bretagne/tour.json"));
+        assert_eq!(from_dir.video, Path::new("data/out/bretagne/video.mp4"));
+    }
 }

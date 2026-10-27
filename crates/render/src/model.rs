@@ -1,4 +1,4 @@
-//! Entrée du moteur, construite par la commande `dijkstravel` à partir du run, du thème et de la
+//! Entrée du moteur, construite par `scene::Scene` à partir du run, du thème et de la
 //! tournée déjà validés.
 
 use serde::Deserialize;
