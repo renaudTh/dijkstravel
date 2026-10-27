@@ -334,6 +334,7 @@ dependencies = [
  "dijkstravel-core",
  "dijkstravel-render",
  "dijkstravel-solve",
+ "dijkstravel-sources",
  "serde_json",
 ]
 
@@ -365,6 +366,15 @@ dependencies = [
 
 [[package]]
 name = "dijkstravel-solve"
+version = "0.1.0"
+dependencies = [
+ "dijkstravel-core",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "dijkstravel-sources"
 version = "0.1.0"
 dependencies = [
  "dijkstravel-core",

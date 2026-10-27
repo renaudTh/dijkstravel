@@ -4,6 +4,7 @@ mod load;
 mod publication;
 mod render;
 mod solve;
+mod source;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -43,6 +44,9 @@ enum Command {
     },
     /// Légende prête à coller (`publication.txt`) et couverture (`cover.jpg`) du run.
     Publication { run: PathBuf },
+    /// Produit les lieux du run (`places.geojson`).
+    #[command(subcommand)]
+    Source(source::Source),
 }
 
 fn validate(arg: &std::path::Path) -> Outcome {
@@ -58,6 +62,7 @@ fn main() -> ExitCode {
         Command::Solve { run } => solve::main(&run),
         Command::Render { run, seconds, threads, frame } => render::main(&run, seconds, threads, frame),
         Command::Publication { run } => publication::main(&run),
+        Command::Source(source) => source::main(source),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,

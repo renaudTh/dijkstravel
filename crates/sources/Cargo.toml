@@ -1,0 +1,9 @@
+[package]
+name = "dijkstravel-sources"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dijkstravel-core.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
