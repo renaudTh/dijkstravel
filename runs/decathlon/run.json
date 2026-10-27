@@ -1,0 +1,27 @@
+{
+  "name": "decathlon",
+  "source": {
+    "kind": "atp",
+    "description": "All The Places, collecteur decathlon_fr",
+    "url": "https://alltheplaces-data.openaddresses.io/runs/2026-10-17-13-32-31/output/decathlon_fr.geojson",
+    "date": "2026-10-27",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": -5.3,
+    "south": 41.3,
+    "east": 9.7,
+    "north": 51.2
+  },
+  "mode": "loop",
+  "video": {
+    "format": "9:16",
+    "durationSec": 120,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Tous les Decathlon de France en un seul trajet 🏃\n{lieux} magasins, {km} de route. Le tien est dedans ?",
+    "hashtags": ["#decathlon", "#sport", "#roadtrip", "#france", "#carte"]
+  }
+}

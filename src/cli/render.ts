@@ -5,11 +5,11 @@ import { loadRun, loadThemeFile, usage } from './shared.ts';
 const USAGE = 'render <run.json> [--seconds=<n>] [--threads=<n>] [--frame=<n>]';
 
 /**
- * `node src/cli/render.ts <run.json>` → `data/<run>/video.mp4`, à partir du seul `tour.json`, par le moteur
+ * `node src/cli/render.ts <run.json>` → `data/out/<run>/video.mp4`, à partir du seul `tour.json`, par le moteur
  * natif (`render/`, sans GPU).
  * `--seconds=<n>` : ne rend que les n premières secondes, pour itérer vite.
  * `--threads=<n>` : threads de rendu (tous les cœurs par défaut).
- * `--frame=<n>` : l'image n seule, dans `data/<run>/frame-<n>.png`.
+ * `--frame=<n>` : l'image n seule, dans `data/out/<run>/frame-<n>.png`.
  */
 export async function main(argv: readonly string[]): Promise<number> {
   const runFile = argv.find((arg) => !arg.startsWith('--'));
@@ -34,7 +34,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   const input = await writeInput(runFile, run, theme);
   if (frame !== undefined) {
     await prefetchTiles(input, `--frame=${String(frame)}`);
-    const outFile = `${paths.dir}/frame-${String(frame)}.png`;
+    const outFile = `${paths.out}/frame-${String(frame)}.png`;
     await renderFrame(input, frame, outFile);
     console.log(outFile);
     return 0;

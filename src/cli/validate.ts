@@ -3,7 +3,7 @@ import { describePlaceIssue, parsePlaces } from '../places.ts';
 import { runPaths } from '../run.ts';
 import { loadRun, usage } from './shared.ts';
 
-/** `node src/cli/validate.ts <run.json>` : valide `data/<run>/places.geojson`. Code 0 si conforme. */
+/** `node src/cli/validate.ts <run.json>` : valide `runs/<run>/places.geojson`. Code 0 si conforme. */
 export async function main(argv: readonly string[]): Promise<number> {
   const [runFile] = argv;
   if (runFile === undefined) return usage('validate <run.json>');

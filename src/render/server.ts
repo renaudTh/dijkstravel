@@ -74,7 +74,7 @@ export async function serveEditor(files: {
     '/editor': join(ROOT, 'src', 'render', 'editor.html'),
     '/run.json': files.runFile,
   };
-  const dir = runPaths(files.run).dir;
+  const dir = runPaths(files.run).out;
   const writeInput = await inputWriter(files.runFile, files.run);
   const engine = previewEngine();
 

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
-import { access, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { basename, extname, join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { extname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { readJson, writeJson } from '../files.ts';
 import { isRecord } from '../narrow.ts';
@@ -18,6 +19,7 @@ const ROOT = join(import.meta.dirname, '..', '..');
 const BINARY = join(ROOT, 'render', 'target', 'release', 'dijkstravel-render');
 const TILE_DIR = join(ROOT, 'data', 'cache', 'tiles');
 const FONT_DIR = join(ROOT, 'data', 'cache', 'fonts');
+const IMAGE_DIR = join(ROOT, 'data', 'cache', 'images');
 /** Graisses de la carte d'infos : titre (700), texte (800), distance (900). */
 const HUD_WEIGHTS = [700, 800, 900] as const;
 const IMAGE_EXTENSIONS = new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp']);
@@ -37,14 +39,56 @@ export class MissingBinaryError extends Error {
   }
 }
 
-/** Images des lieux, rangées à côté de la tournée : `images/<id du lieu>.<ext>` → chemin absolu. */
-async function placeImages(dir: string): Promise<Record<string, string>> {
-  const names = await readdir(dir).catch(() => []);
-  return Object.fromEntries(
-    names
-      .filter((name) => IMAGE_EXTENSIONS.has(extname(name).toLowerCase()))
-      .map((name) => [basename(name, extname(name)), resolve(dir, name)]),
-  );
+/**
+ * Images des lieux (`image` dans `places.geojson`), téléchargées une fois dans `data/cache/images/` :
+ * identifiant du lieu → chemin absolu. Une image introuvable est signalée et le lieu reste sans.
+ */
+async function placeImages(placesFile: string): Promise<Record<string, string>> {
+  const raw = await readJson(placesFile);
+  const features: readonly unknown[] = isRecord(raw) && Array.isArray(raw['features']) ? raw['features'] : [];
+  const wanted = features.flatMap((feature) => {
+    const properties = isRecord(feature) ? feature['properties'] : undefined;
+    if (!isRecord(properties)) return [];
+    const { id, image } = properties;
+    return typeof id === 'string' && typeof image === 'string' ? [[id, image] as const] : [];
+  });
+  const images: Record<string, string> = {};
+  // Séquentiel : upload.wikimedia.org répond 429 aux rafales.
+  for (const [id, url] of wanted) {
+    const file = await cachedImage(url);
+    if (file === null) console.warn(`Image introuvable pour ${id} : ${url}`);
+    else images[id] = file;
+  }
+  return images;
+}
+
+async function cachedImage(url: string): Promise<string | null> {
+  const extension = extname(new URL(url).pathname).toLowerCase();
+  if (!IMAGE_EXTENSIONS.has(extension)) return null;
+  const file = join(IMAGE_DIR, `${createHash('sha1').update(url).digest('hex')}${extension}`);
+  if (
+    await access(file).then(
+      () => true,
+      () => false,
+    )
+  )
+    return file;
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    const response = await fetch(url, {
+      headers: { 'user-agent': 'dijkstravel/0.1 (outil personnel de cartographie)' },
+    });
+    if (response.status === 429) {
+      await new Promise((done) => setTimeout(done, Number(response.headers.get('retry-after') ?? '15') * 1000));
+      continue;
+    }
+    if (!response.ok) return null;
+    await mkdir(IMAGE_DIR, { recursive: true });
+    const partial = `${file}.${String(process.pid)}.part`;
+    await writeFile(partial, Buffer.from(await response.arrayBuffer()));
+    await rename(partial, file);
+    return file;
+  }
+  return null;
 }
 
 /**
@@ -90,7 +134,7 @@ export async function loadTheme(themeFile: string): Promise<Theme> {
 }
 
 /**
- * Écrit l'entrée du moteur pour un thème (`data/<run>/render-input.json` par défaut) et renvoie son
+ * Écrit l'entrée du moteur pour un thème (`data/out/<run>/render-input.json` par défaut) et renvoie son
  * chemin. La tournée, le titre et les images ne sont lus qu'une fois : l'éditeur en écrit une par aperçu.
  */
 export async function inputWriter(
@@ -101,8 +145,8 @@ export async function inputWriter(
   // Lu ici pour échouer tôt ; le moteur relit le même fichier.
   const tour = parseTour(await readJson(paths.tour));
   const title = runTitle(await readJson(runFile)) ?? `${String(tour.stops.length)} lieux · ${run.name}`;
-  const images = await placeImages(join(paths.dir, 'images'));
-  return async (theme, file = `${paths.dir}/render-input.json`) => {
+  const images = await placeImages(paths.places);
+  return async (theme, file = `${paths.out}/render-input.json`) => {
     const imagery = IMAGERY_SOURCES[theme.basemap.imagery];
     await writeJson(file, {
       video: { ...run.video, ...VIDEO_SIZES[run.video.format] },
@@ -120,7 +164,7 @@ export async function inputWriter(
   };
 }
 
-/** `data/<run>/render-input.json` pour le thème enregistré du run. */
+/** `data/out/<run>/render-input.json` pour le thème enregistré du run. */
 export async function writeInput(runFile: string, run: Run, themeFile: string): Promise<string> {
   const write = await inputWriter(runFile, run);
   return write(await loadTheme(themeFile));

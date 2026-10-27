@@ -12,7 +12,7 @@ const OSRM_URLS = {
 } as const;
 
 /**
- * `node src/cli/solve.ts <run.json>` → `data/<run>/tour.json`.
+ * `node src/cli/solve.ts <run.json>` → `runs/<run>/tour.json`.
  * Seul lecteur de `OSRM_URL`, `OSRM_FOOT_URL`, `OSRM_TRAIN_URL` et `VROOM_URL`.
  */
 export async function main(argv: readonly string[]): Promise<number> {
@@ -23,7 +23,13 @@ export async function main(argv: readonly string[]): Promise<number> {
   if (profile === null) console.error(`${runFile} : profile attendu car | foot | train`);
   if (run === null || profile === null) return 1;
   const paths = runPaths(run);
-  const places = parsePlaces(await readText(paths.places), run.bbox);
+  const text = await readText(paths.places).catch(() => null);
+  if (text === null) {
+    const source = run.overpass === null ? 'source:csv` ou `sources/oneshot/enseigne-atp.ts' : 'source:overpass';
+    console.error(`${paths.places} absent : le produire d'abord (\`${source}\`).`);
+    return 1;
+  }
+  const places = parsePlaces(text, run.bbox);
   if (!places.ok) {
     for (const issue of places.errors) console.error(describePlaceIssue(issue));
     return 1;

@@ -1,0 +1,28 @@
+{
+  "name": "guyane-communes",
+  "source": {
+    "kind": "manuel",
+    "description": "Communes du département (geo.api.gouv.fr, Code officiel géographique), position de la mairie",
+    "date": "2026-10-25",
+    "licence": "Licence ouverte 2.0"
+  },
+  "title": "Les communes de Guyane par la route et le fleuve",
+  "bbox": {
+    "west": -54.65,
+    "south": 2.1,
+    "east": -51.5,
+    "north": 5.85
+  },
+  "mode": "loop",
+  "theme": "lagon",
+  "video": {
+    "format": "9:16",
+    "durationSec": 60,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Les communes de Guyane par la route et le fleuve 🛶\n{lieux} communes, {km} dont des centaines en pirogue sur le Maroni et l'Oyapock. Saül et Saint-Élie ? Seulement en avion ✈️",
+    "hashtags": ["#guyane", "#973", "#outremer", "#maroni", "#roadtrip", "#geographie"]
+  }
+}

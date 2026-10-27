@@ -1,0 +1,29 @@
+{
+  "name": "prefectures",
+  "source": {
+    "kind": "manuel",
+    "description": "Chefs-lieux des 96 départements de métropole (Code officiel géographique INSEE 2026), position de la mairie (geo.api.gouv.fr)",
+    "url": "https://www.insee.fr/fr/statistiques/fichier/8740222/v_departement_2026.csv",
+    "date": "2026-10-27",
+    "licence": "Licence ouverte 2.0"
+  },
+  "title": "Les 96 préfectures de France en un seul trajet",
+  "bbox": {
+    "west": -5.3,
+    "south": 41.3,
+    "east": 9.7,
+    "north": 51.2
+  },
+  "mode": "open",
+  "theme": "republique",
+  "video": {
+    "format": "9:16",
+    "durationSec": 84,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Les {lieux} préfectures de France en un seul trajet 🇫🇷\n{km} de route. Tu connais celle de ton département ?",
+    "hashtags": ["#france", "#geographie", "#prefecture", "#roadtrip", "#culturegenerale"]
+  }
+}

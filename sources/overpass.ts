@@ -122,7 +122,7 @@ export async function fetchOverpass(query: string): Promise<unknown> {
   return raw;
 }
 
-/** `node sources/overpass.ts <run.json>` → `data/<run>/places.geojson`. */
+/** `node sources/overpass.ts <run.json>` → `runs/<run>/places.geojson`. */
 export async function main(argv: readonly string[]): Promise<number> {
   const [runFile] = argv;
   if (runFile === undefined) return usage('source:overpass <run.json>');

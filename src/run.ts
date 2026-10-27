@@ -51,10 +51,12 @@ export type Run = {
 
 export type RunIssue = { readonly path: string; readonly expected: string };
 
+/** `dir` : le run versionné (`run.json`, `places.geojson`, `tour.json`) ; `out` : ce qui s'en déduit, hors dépôt. */
 export type RunPaths = {
   readonly dir: string;
   readonly places: string;
   readonly tour: string;
+  readonly out: string;
   readonly video: string;
 };
 
@@ -141,8 +143,9 @@ function parseVideo(raw: unknown, issues: RunIssue[]): VideoSettings | null {
 }
 
 export function runPaths(run: Pick<Run, 'name'>): RunPaths {
-  const dir = `data/${run.name}`;
-  return { dir, places: `${dir}/places.geojson`, tour: `${dir}/tour.json`, video: `${dir}/video.mp4` };
+  const dir = `runs/${run.name}`;
+  const out = `data/out/${run.name}`;
+  return { dir, places: `${dir}/places.geojson`, tour: `${dir}/tour.json`, out, video: `${out}/video.mp4` };
 }
 
 /** Thème d'un run (`"theme": "prune"` → `themes/prune.json`), `default` s'il n'en déclare pas ; `null` si le nom est invalide. */

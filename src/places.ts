@@ -7,6 +7,8 @@ export type Place = {
   readonly name: string;
   readonly at: LonLat;
   readonly source: string | null;
+  /** Adresse d'une image du lieu (blason, logo…), téléchargée dans le cache au rendu. */
+  readonly image?: string;
 };
 
 /** Le format figé de `places.geojson`, contrat avec toutes les sources. */
@@ -18,7 +20,12 @@ export type PlacesFile = {
 export type PlaceFeature = {
   readonly type: 'Feature';
   readonly geometry: { readonly type: 'Point'; readonly coordinates: LonLat };
-  readonly properties: { readonly id: string; readonly name: string; readonly source?: string };
+  readonly properties: {
+    readonly id: string;
+    readonly name: string;
+    readonly source?: string;
+    readonly image?: string;
+  };
 };
 
 export type PlaceIssue =
@@ -70,6 +77,7 @@ function parseFeature(feature: unknown, index: number, bbox: BBox, issues: Place
   const id = isNonEmptyString(rawId) ? rawId : null;
   const name = properties['name'];
   const source = properties['source'];
+  const image = properties['image'];
   const geometry = isRecord(feature) ? feature['geometry'] : undefined;
   const before = issues.length;
 
@@ -88,7 +96,8 @@ function parseFeature(feature: unknown, index: number, bbox: BBox, issues: Place
   }
 
   if (issues.length > before || id === null || !isNonEmptyString(name) || at === null) return null;
-  return { id, name: name.trim(), at, source: typeof source === 'string' ? source : null };
+  const place = { id, name: name.trim(), at, source: typeof source === 'string' ? source : null };
+  return isNonEmptyString(image) ? { ...place, image } : place;
 }
 
 function parseCoordinates(raw: unknown): LonLat | null {
@@ -106,10 +115,12 @@ export function toPlacesFile(places: readonly Place[]): PlacesFile {
     features: places.map((place) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: place.at },
-      properties:
-        place.source === null
-          ? { id: place.id, name: place.name }
-          : { id: place.id, name: place.name, source: place.source },
+      properties: {
+        id: place.id,
+        name: place.name,
+        ...(place.source === null ? {} : { source: place.source }),
+        ...(place.image === undefined ? {} : { image: place.image }),
+      },
     })),
   };
 }

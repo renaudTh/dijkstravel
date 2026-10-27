@@ -1,0 +1,28 @@
+{
+  "name": "gares-ter",
+  "source": {
+    "kind": "manuel",
+    "description": "Arrêts StopPoint:OCETrain TER du GTFS national SNCF, commune d'après le référentiel « Gares de voyageurs » (à défaut geo.api.gouv.fr) ; Île-de-France écartée sauf Paris intra-muros, gares à l'étranger écartées",
+    "url": "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip",
+    "date": "2026-10-27",
+    "licence": "Licence ouverte / ODbL (SNCF)"
+  },
+  "bbox": {
+    "west": -5.3,
+    "south": 41.3,
+    "east": 9.7,
+    "north": 51.2
+  },
+  "mode": "loop",
+  "profile": "train",
+  "video": {
+    "format": "9:16",
+    "durationSec": 145,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Toutes les gares TER de France, en train 🚆\n{lieux} gares, {km} de rails. Ta gare est sur le trajet ?",
+    "hashtags": ["#sncf", "#ter", "#train", "#france", "#ferroviaire"]
+  }
+}

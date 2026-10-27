@@ -1,0 +1,28 @@
+{
+  "name": "bundesliga-stades",
+  "source": {
+    "kind": "manuel",
+    "description": "Wikipédia (tableaux des stades de la saison 2026-2027), coordonnées des articles des stades contrôlées par la commune (geo.api.gouv.fr ou Nominatim) ; blasons : image principale de l'article du club sur Wikipédia (anglais), non libres",
+    "date": "2026-10-25",
+    "licence": "CC BY-SA (Wikipédia)"
+  },
+  "title": "Tous les stades de Bundesliga en un seul trajet",
+  "bbox": {
+    "west": 5.8,
+    "south": 47.2,
+    "east": 15.1,
+    "north": 55.1
+  },
+  "mode": "loop",
+  "video": {
+    "format": "9:16",
+    "durationSec": 60,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "theme": "foot",
+  "publication": {
+    "caption": "Tous les stades de Bundesliga en un seul trajet ⚽🇩🇪\n{lieux} stades, {km} de route. Lequel tu rêves de faire ?",
+    "hashtags": ["#bundesliga", "#football", "#stade", "#foot", "#roadtrip", "#allemagne"]
+  }
+}

@@ -1,0 +1,3 @@
+# Données des runs : JSON compact, régénéré par les outils, illisible en diff.
+runs/*/tour.json -diff linguist-generated
+runs/*/places.geojson linguist-generated

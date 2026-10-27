@@ -73,7 +73,7 @@ export type Theme = {
     readonly showTitle: boolean;
     readonly showCount: boolean;
     readonly showLastStop: boolean;
-    /** Image du dernier lieu (blason, logo…) quand le run en fournit dans `data/<run>/images/`. */
+    /** Image du dernier lieu (blason, logo…) quand ses lieux en ont une (`image` dans `places.geojson`). */
     readonly showImage: boolean;
   };
   readonly camera: {

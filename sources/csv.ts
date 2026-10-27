@@ -106,7 +106,7 @@ export function describeCsvIssue(issue: CsvIssue): string {
   }
 }
 
-/** `node sources/csv.ts <run.json> <lieux.csv>` → `data/<run>/places.geojson`. */
+/** `node sources/csv.ts <run.json> <lieux.csv>` → `runs/<run>/places.geojson`. */
 export async function main(argv: readonly string[]): Promise<number> {
   const [runFile, csvFile] = argv;
   if (runFile === undefined || csvFile === undefined) return usage('source:csv <run.json> <lieux.csv>');

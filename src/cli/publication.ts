@@ -9,8 +9,8 @@ import { loadRun, loadThemeFile, usage } from './shared.ts';
 const km = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 
 /**
- * `node src/cli/publication.ts <run.json>` → `data/<run>/publication.txt` (légende prête à coller) et,
- * `data/<run>/cover.jpg` (dernière image, tracé complet dézoomé, sans la carte d'infos : place libre pour un titre).
+ * `node src/cli/publication.ts <run.json>` → `data/out/<run>/publication.txt` (légende prête à coller) et,
+ * `data/out/<run>/cover.jpg` (dernière image, tracé complet dézoomé, sans la carte d'infos : place libre pour un titre).
  */
 export async function main(argv: readonly string[]): Promise<number> {
   const [runFile] = argv;
@@ -35,7 +35,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     () => true,
     () => false,
   );
-  const cover = `${paths.dir}/cover.jpg`;
+  const cover = `${paths.out}/cover.jpg`;
   // Toute dernière image : fin de l'outro, tracé complet dézoomé, sans la carte d'infos.
   const input = await writeInput(runFile, run, theme);
   const last = frameCount(timeline(run.video)) - 1;
@@ -57,7 +57,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     'Sources : la mention OpenStreetMap / imagerie est déjà dans la vidéo, rien à ajouter dans la légende.',
     '',
   ].join('\n');
-  await writeFile(`${paths.dir}/publication.txt`, text);
+  await writeFile(`${paths.out}/publication.txt`, text);
   console.log(text);
   return 0;
 }

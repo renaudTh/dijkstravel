@@ -82,7 +82,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   const run = await loadRun(runFile);
   if (run === null) return 1;
   const paths = runPaths(run);
-  const candidates = [paths.video, `${paths.dir}/cover.jpg`, `${paths.dir}/publication.txt`];
+  const candidates = [paths.video, `${paths.out}/cover.jpg`, `${paths.out}/publication.txt`];
   const present = await Promise.all(
     candidates.map((file) =>
       stat(file).then(

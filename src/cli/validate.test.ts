@@ -27,7 +27,7 @@ describe('validate CLI', () => {
         mode: 'loop',
       }),
     );
-    await mkdir(path.join(dir, 'data', RUN_NAME), { recursive: true });
+    await mkdir(path.join(dir, 'runs', RUN_NAME), { recursive: true });
     process.chdir(dir);
   });
 
@@ -38,7 +38,7 @@ describe('validate CLI', () => {
 
   async function writePlaces(...features: unknown[]): Promise<void> {
     await writeFile(
-      path.join(dir, 'data', RUN_NAME, 'places.geojson'),
+      path.join(dir, 'runs', RUN_NAME, 'places.geojson'),
       JSON.stringify({ type: 'FeatureCollection', features }),
     );
   }

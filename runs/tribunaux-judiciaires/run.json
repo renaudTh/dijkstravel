@@ -1,0 +1,29 @@
+{
+  "name": "tribunaux-judiciaires",
+  "source": {
+    "kind": "manuel",
+    "description": "Les 157 tribunaux judiciaires de métropole, Annuaire de l'administration (DILA), position de l'adresse de la fiche",
+    "url": "https://api-lannuaire.service-public.fr/api/explore/v2.1/catalog/datasets/api-lannuaire-administration/exports/json",
+    "date": "2026-10-25",
+    "licence": "Licence ouverte 2.0"
+  },
+  "title": "Les 157 tribunaux judiciaires de France en un seul trajet",
+  "bbox": {
+    "west": -5.3,
+    "south": 41.3,
+    "east": 9.7,
+    "north": 51.2
+  },
+  "mode": "loop",
+  "theme": "justice",
+  "video": {
+    "format": "9:16",
+    "durationSec": 90,
+    "introSec": 2,
+    "outroSec": 3
+  },
+  "publication": {
+    "caption": "Les {lieux} tribunaux judiciaires de France en un seul trajet ⚖️\n{km} de route. Tu as déjà mis les pieds dans lequel ?",
+    "hashtags": ["#justice", "#tribunal", "#france", "#droit", "#roadtrip", "#culturegenerale"]
+  }
+}
