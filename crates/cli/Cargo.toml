@@ -4,9 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 dijkstravel-core.workspace = true
 dijkstravel-render.workspace = true
 dijkstravel-solve.workspace = true
 dijkstravel-sources.workspace = true
+dotenvy = "0.15"
 serde_json.workspace = true
+ureq.workspace = true

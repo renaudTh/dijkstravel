@@ -5,6 +5,7 @@ mod publication;
 mod render;
 mod solve;
 mod source;
+mod upload;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -47,6 +48,8 @@ enum Command {
     /// Produit les lieux du run (`places.geojson`).
     #[command(subcommand)]
     Source(source::Source),
+    /// Envoie la vidéo, la couverture et la légende sur Nextcloud (`.env`).
+    Upload { run: PathBuf },
 }
 
 fn validate(arg: &std::path::Path) -> Outcome {
@@ -63,6 +66,7 @@ fn main() -> ExitCode {
         Command::Render { run, seconds, threads, frame } => render::main(&run, seconds, threads, frame),
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
+        Command::Upload { run } => upload::main(&run),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
