@@ -16,7 +16,7 @@ import { DEFAULT_TILE_OPTIONS, limiter, sourceFetcher } from './tiles.ts';
  * l'entrée du moteur et remplit le cache des tuiles ; le moteur ne lit que le disque.
  */
 const ROOT = join(import.meta.dirname, '..', '..');
-const BINARY = join(ROOT, 'render', 'target', 'release', 'dijkstravel-render');
+const BINARY = join(ROOT, 'target', 'release', 'dijkstravel-render');
 const TILE_DIR = join(ROOT, 'data', 'cache', 'tiles');
 const FONT_DIR = join(ROOT, 'data', 'cache', 'fonts');
 const IMAGE_DIR = join(ROOT, 'data', 'cache', 'images');

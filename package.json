@@ -12,7 +12,7 @@
     "validate": "node src/cli/validate.ts",
     "solve": "node src/cli/solve.ts",
     "render": "node src/cli/render.ts",
-    "build:render": "cargo build --release --manifest-path render/Cargo.toml",
+    "build:render": "cargo build --release -p dijkstravel-render",
     "source:csv": "node sources/csv.ts",
     "source:overpass": "node sources/overpass.ts",
     "editor": "node src/cli/editor.ts",

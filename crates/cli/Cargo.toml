@@ -1,0 +1,9 @@
+[package]
+name = "dijkstravel"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+dijkstravel-core.workspace = true
+serde_json.workspace = true

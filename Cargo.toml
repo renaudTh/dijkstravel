@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+dijkstravel-core = { path = "crates/core" }
+dijkstravel-render = { path = "crates/render" }
+dijkstravel-solve = { path = "crates/solve" }
+dijkstravel-sources = { path = "crates/sources" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
+ureq = { version = "3", features = ["json"] }
+

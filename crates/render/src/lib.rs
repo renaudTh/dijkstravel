@@ -1,9 +1,10 @@
+pub use dijkstravel_core::geo;
+
 pub mod atlas;
 pub mod borders;
 pub mod cache;
 pub mod color;
 pub mod frame;
-pub mod geo;
 pub mod hillshade;
 pub mod hud;
 pub mod mercator;
