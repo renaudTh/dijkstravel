@@ -25,7 +25,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   const paths = runPaths(run);
   const text = await readText(paths.places).catch(() => null);
   if (text === null) {
-    const source = run.overpass === null ? 'source:csv` ou `sources/oneshot/enseigne-atp.ts' : 'source:overpass';
+    const source = run.overpass === null ? 'source:csv` ou `sources/atp.ts' : 'source:overpass';
     console.error(`${paths.places} absent : le produire d'abord (\`${source}\`).`);
     return 1;
   }

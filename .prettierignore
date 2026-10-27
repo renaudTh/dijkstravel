@@ -1,7 +1,6 @@
 /data
-sources/oneshot/
 vroom/
-render/target/
-render/tests/fixtures/
+/target/
+crates/render/tests/fixtures/
 runs/*/places.geojson
 runs/*/tour.json

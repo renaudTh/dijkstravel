@@ -1,21 +1,24 @@
-// Script jetable : les magasins d'une enseigne en France, d'après All The Places (CC0).
-// `node sources/oneshot/enseigne-atp.ts runs/lidl.json data/atp/lidl.geojson`
-// `node sources/oneshot/enseigne-atp.ts runs/ikea.json data/atp/ikea.geojson STORE,SMALL,SHOP`
+// Les magasins d'une enseigne en France, d'après All The Places (CC0).
+// `node sources/atp.ts runs/lidl.json data/atp/lidl.geojson`
+// `node sources/atp.ts runs/ikea.json data/atp/ikea.geojson STORE,SMALL,SHOP`
 //
 // Fichier d'un collecteur : https://alltheplaces-data.openaddresses.io/runs/<run>/output/<collecteur>.geojson
 // (dernière exécution : https://data.alltheplaces.xyz/runs/latest.json). Collectés sur les sites des enseignes,
 // souvent plus complets qu'OSM pour les chaînes.
 import { readFile } from 'node:fs/promises';
-import { loadRun } from '../../src/cli/shared.ts';
-import { writeJson } from '../../src/files.ts';
-import { inBBox } from '../../src/geo.ts';
-import { isLonLatArray, isRecord } from '../../src/narrow.ts';
-import { describePlaceIssue, parsePlaces, toPlacesFile, type Place } from '../../src/places.ts';
-import { runPaths } from '../../src/run.ts';
+import { loadRun } from '../src/cli/shared.ts';
+import { writeJson } from '../src/files.ts';
+import { inBBox } from '../src/geo.ts';
+import { isLonLatArray, isRecord } from '../src/narrow.ts';
+import { describePlaceIssue, parsePlaces, toPlacesFile, type Place } from '../src/places.ts';
+import { runPaths } from '../src/run.ts';
 
 /** « BELFORT Altkirch » → « Belfort Altkirch » : les enseignes écrivent souvent les villes en capitales. */
 const tidy = (text: string): string =>
-  text.replace(/\p{Lu}{2,}/gu, (word) => word.charAt(0) + word.slice(1).toLowerCase()).replace(/\s+/g, ' ').trim();
+  text
+    .replace(/\p{Lu}{2,}/gu, (word) => word.charAt(0) + word.slice(1).toLowerCase())
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const [runFile, geojsonFile, typesArg] = process.argv.slice(2);
 if (runFile === undefined || geojsonFile === undefined) {
@@ -51,4 +54,6 @@ if (!validated.ok) {
   process.exit(1);
 }
 await writeJson(runPaths(run).places, file);
-console.log(`${runPaths(run).places} : ${String(validated.value.length)} magasins (${String(features.length)} dans le fichier)`);
+console.log(
+  `${runPaths(run).places} : ${String(validated.value.length)} magasins (${String(features.length)} dans le fichier)`,
+);

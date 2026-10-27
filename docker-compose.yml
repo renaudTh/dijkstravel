@@ -7,6 +7,11 @@
 #   docker run --rm -v "$PWD/data/osrm:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/<extrait>.osrm
 #   docker run --rm -v "$PWD/data/osrm:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/<extrait>.osrm
 # Puis : OSRM_EXTRACT=<extrait> docker compose up -d
+# Graphe dom-routes (Réunion, Martinique, Guadeloupe, Guyane fusionnées) : ferries passagers retaggés
+# motor_vehicle=yes, puis fusion des correctifs versionnés dans osrm-patches/ avant osrm-extract :
+#   debarcaderes.osm.pbf : quais piétons raccordés à la route (sans eux, les Saintes et la Désirade sont injoignables) ;
+#   pirogues.osm.pbf : lignes de pirogue du Maroni et de l'Oyapock, absentes d'OSM, en route=ferry.
+#   osmium merge dom-routes.osm.pbf osrm-patches/*.osm.pbf -o dom-routes-patche.osm.pbf
 services:
   osrm:
     image: ghcr.io/project-osrm/osrm-backend:latest
