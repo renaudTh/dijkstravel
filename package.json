@@ -2,26 +2,12 @@
   "name": "dijkstravel",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
-    "lint": "tsc && eslint . && prettier --check .",
-    "format": "prettier --write .",
-    "test": "node --test \"src/**/*.test.ts\" \"sources/**/*.test.ts\"",
-    "validate": "node src/cli/validate.ts",
-    "solve": "node src/cli/solve.ts",
-    "render": "node src/cli/render.ts",
-    "build:render": "cargo build --release -p dijkstravel-render",
-    "source:csv": "node sources/csv.ts",
-    "source:overpass": "node sources/overpass.ts",
-    "editor": "node src/cli/editor.ts",
-    "publication": "node src/cli/publication.ts",
-    "upload": "node --env-file-if-exists=.env src/cli/upload.ts",
-    "build:editor": "tsc -p editor"
+    "build:editor": "tsc -p editor",
+    "lint": "tsc -p editor --noEmit && eslint . && prettier --check .",
+    "format": "prettier --write ."
   },
   "devDependencies": {
-    "@types/node": "24.19.2",
     "eslint": "10.13.0",
     "prettier": "3.9.10",
     "typescript": "6.0.3",

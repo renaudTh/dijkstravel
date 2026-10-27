@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn names_cached_images_like_before() {
-        // Même nom que le cache rempli par Node : les blasons déjà téléchargés servent toujours.
+        // Même nom que le cache rempli par l'ancienne chaîne Node : les blasons déjà téléchargés servent toujours.
         let url = "https://upload.wikimedia.org/wikipedia/commons/f/f6/Angers_Sporting_Club_de_l%27Ouest_logo.svg";
         assert_eq!(sha1_smol::Sha1::from(url).digest().to_string(), "919eb15cfc039b36a259224fc4430d668ca941f7");
     }

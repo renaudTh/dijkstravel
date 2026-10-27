@@ -1,4 +1,4 @@
-//! Portage de `src/render/frame.ts` : chaque image ne dépend que de son numéro.
+//! Phases, caméra et carte d'infos de chaque image : elles ne dépendent que de son numéro.
 
 use std::sync::Arc;
 

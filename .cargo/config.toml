@@ -1,0 +1,3 @@
+# `cargo dj solve runs/ligue1-stades` : la commande `dijkstravel`, compilée en release.
+[alias]
+dj = "run --quiet --release -p dijkstravel --"

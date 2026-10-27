@@ -1,5 +1,5 @@
 //! Lieux de la tournée : couches `stops`, `stops-core`, `stops-image`, `stops-label` et `stops-icon` de
-//! `src/render/page.ts`, dans cet ordre.
+//! l'ancien rendu MapLibre, dans cet ordre.
 
 use skia_safe::gradient::{Colors, Gradient, Interpolation, shaders::radial_gradient};
 use skia_safe::{Canvas, Color, Color4f, Contains, Image, Paint, Point, Rect, TileMode};

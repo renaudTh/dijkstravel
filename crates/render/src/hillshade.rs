@@ -19,7 +19,7 @@ const DIM: usize = 256;
 const PREPARED: usize = DIM + 2;
 /// `u_log2_world_width` de MapLibre pour Web Mercator.
 const LOG2_WORLD_WIDTH: f64 = 25.2562;
-/// Couleurs d'ombre et de lumière de `src/render/page.ts`, accent noir par défaut.
+/// Couleurs d'ombre et de lumière de l'ancien rendu MapLibre, accent noir par défaut.
 const SHADOW: [f32; 3] = [0x1f as f32 / 255.0, 0x2a as f32 / 255.0, 0x1a as f32 / 255.0];
 const HIGHLIGHT: [f32; 3] = [1.0, 0xf7 as f32 / 255.0, 0xe0 as f32 / 255.0];
 /// `hillshade-illumination-direction` par défaut (335°), plus π comme dans le shader.

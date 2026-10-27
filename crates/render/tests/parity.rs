@@ -1,4 +1,4 @@
-//! Parité avec le TS : valeurs de référence écrites par `node src/render/parity-fixtures.ts`.
+//! Non-régression : valeurs de référence figées, calculées par l'ancienne implémentation TypeScript.
 //! `fixtures/real/` (vraies tournées, hors dépôt) est vérifié aussi quand il existe.
 
 use std::path::{Path, PathBuf};
@@ -172,10 +172,10 @@ fn fixtures(dir: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
-fn parity_with_typescript() {
+fn matches_the_reference_values() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let committed = fixtures(&dir);
-    assert!(!committed.is_empty(), "aucune valeur de référence : node src/render/parity-fixtures.ts");
+    assert!(!committed.is_empty(), "aucune valeur de référence dans tests/fixtures");
     for file in committed.iter().chain(&fixtures(&dir.join("real"))) {
         check(file);
     }

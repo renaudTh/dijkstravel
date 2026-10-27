@@ -1,5 +1,5 @@
 //! Images dessinées une seule fois puis posées à chaque image : emojis, images des lieux, noms des
-//! lieux avec leur halo. Mêmes tailles et mêmes cadrages que `src/render/page.ts`.
+//! lieux avec leur halo. Mêmes tailles et mêmes cadrages que l'ancien rendu MapLibre.
 
 use skia_safe::textlayout::{FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, TextAlign, TextStyle};
 use skia_safe::{

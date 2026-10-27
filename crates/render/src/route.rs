@@ -1,5 +1,5 @@
 //! Tracé parcouru (`traced-stripe`, `traced`, `traced-core`) et tête du tracé (`head`), comme les couches
-//! de `src/render/page.ts`.
+//! de l'ancien rendu MapLibre.
 
 use skia_safe::canvas::SaveLayerRec;
 use skia_safe::{BlendMode, Canvas, Color, Contains, Image, Paint, PathBuilder, Point, Rect, paint};

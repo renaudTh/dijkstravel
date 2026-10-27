@@ -2,16 +2,12 @@ import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['node_modules', 'data', 'sources/oneshot'] },
+  { ignores: ['node_modules', 'data', 'target', 'editor/dist'] },
   {
     files: ['**/*.ts'],
     extends: [tseslint.configs.strictTypeChecked],
     languageOptions: { parserOptions: { projectService: true } },
     rules: {
-      '@typescript-eslint/no-floating-promises': [
-        'error',
-        { allowForKnownSafeCalls: [{ from: 'package', package: 'node:test', name: ['describe', 'test', 'it'] }] },
-      ],
       '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
       'no-restricted-syntax': [
         'error',

@@ -1,5 +1,5 @@
-//! Entrée du moteur, écrite par `src/render/native.ts` : déjà validée et complétée côté Node
-//! (`parseRun`, `parseTheme`, `parseTour`), elle est lue telle quelle.
+//! Entrée du moteur, construite par la commande `dijkstravel` à partir du run, du thème et de la
+//! tournée déjà validés.
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -7,45 +7,38 @@ use std::collections::HashMap;
 pub use dijkstravel_core::theme::{BasemapTheme, CameraTheme, HudTheme, RouteTheme, StopsTheme, Theme};
 pub use dijkstravel_core::tour::{Stop, Tour};
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct Input {
     pub video: Video,
     pub theme: Theme,
-    /// `tour.json` tel que l'écrit le solveur : lu directement, sans recopie dans l'entrée.
-    pub tour_file: String,
-    #[serde(default)]
     pub title: String,
     /// Image de chaque lieu qui en a une : identifiant du lieu → fichier.
-    #[serde(default)]
     pub images: HashMap<String, String>,
     pub imagery: ImagerySource,
     /// Relief (Terrarium) d'où vient l'ombrage.
     pub terrain: TileSource,
     /// Tuiles vectorielles d'où viennent les frontières.
     pub vector: TileSource,
-    /// Cache disque des tuiles (`data/cache/tiles`), rempli par Node avant le rendu.
+    /// Cache disque des tuiles (`data/cache/tiles`), rempli avant le rendu (`download`).
     pub tile_dir: String,
     /// Police de la carte d'infos, un fichier TTF par graisse.
-    #[serde(default)]
     pub hud_fonts: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImagerySource {
     pub name: String,
     pub maxzoom: u8,
     pub credit: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TileSource {
     pub name: String,
     pub maxzoom: u8,
 }
 
+/// Lue aussi dans les valeurs de référence des tests.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Video {

@@ -59,7 +59,6 @@ impl Scene {
     pub fn input(&self, theme: Theme) -> Outcome<Input> {
         Ok(Input {
             video: self.video(),
-            tour_file: self.paths.tour.display().to_string(),
             title: self.title.clone(),
             images: self.images.clone(),
             imagery: download::imagery_source(&theme.basemap.imagery),

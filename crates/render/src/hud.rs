@@ -1,4 +1,4 @@
-//! Carte d'infos et mention des sources, reproduction du CSS de `src/render/index.html` : titre,
+//! Carte d'infos et mention des sources, reproduction du CSS de l'ancien rendu MapLibre : titre,
 //! distance parcourue, nombre de lieux, dernier lieu atteint dans sa pastille, image de ce lieu.
 
 use std::cell::RefCell;
