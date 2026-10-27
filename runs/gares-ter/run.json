@@ -1,5 +1,6 @@
 {
   "name": "gares-ter",
+  "title": "Toutes les gares TER de France en un seul trajet",
   "source": {
     "kind": "manuel",
     "description": "Arrêts StopPoint:OCETrain TER du GTFS national SNCF, commune d'après le référentiel « Gares de voyageurs » (à défaut geo.api.gouv.fr) ; Île-de-France écartée sauf Paris intra-muros, gares à l'étranger écartées",
@@ -21,6 +22,7 @@
     "introSec": 2,
     "outroSec": 3
   },
+  "theme": "sncf",
   "publication": {
     "caption": "Toutes les gares TER de France, en train 🚆\n{lieux} gares, {km} de rails. Ta gare est sur le trajet ?",
     "hashtags": ["#sncf", "#ter", "#train", "#france", "#ferroviaire"]

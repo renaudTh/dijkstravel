@@ -1,0 +1,47 @@
+{
+  "route": {
+    "color": "#a1006b",
+    "coreColor": "#ffd1e8",
+    "width": 12,
+    "coreRatio": 0.35,
+    "coreBlurRatio": 0.5,
+    "headRadius": 30,
+    "headColor": "#a1006b",
+    "headIcon": "🚆"
+  },
+  "stops": {
+    "unvisitedColor": "#c9b3c2",
+    "unvisitedRadius": 2.5,
+    "visitedRatio": 1.2,
+    "popRadius": 10
+  },
+  "basemap": {
+    "imagery": "nasa",
+    "brightness": 0.04,
+    "contrast": 0.2,
+    "saturation": -0.3,
+    "hillshade": 0.35,
+    "borders": true,
+    "borderColor": "#ffffff",
+    "tintColor": "#2a0a20",
+    "tintOpacity": 0.3
+  },
+  "hud": {
+    "font": "Nunito",
+    "size": 44,
+    "background": "#2a0a20",
+    "textColor": "#ffffff",
+    "titleColor": "#ffffff",
+    "distanceColor": "#ff5a8c",
+    "pillFrom": "#a1006b",
+    "pillTo": "#e4002b",
+    "pillTextColor": "#ffffff",
+    "showTitle": true,
+    "showCount": true,
+    "showLastStop": true,
+    "showImage": false
+  },
+  "camera": {
+    "followFraction": 0.2
+  }
+}
