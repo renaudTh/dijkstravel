@@ -4,3 +4,4 @@ vroom/
 crates/render/tests/fixtures/
 runs/*/places.geojson
 runs/*/tour.json
+editor/dist/

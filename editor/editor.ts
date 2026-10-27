@@ -1,16 +1,55 @@
 // Éditeur de thème : réglages à gauche, à droite l'image du moteur de rendu, telle que la vidéo la montrera.
-import { isRecord } from '../narrow.ts';
-import { parseRun, VIDEO_SIZES } from '../run.ts';
-import { frameCount, timeline } from './frame.ts';
-import {
-  DEFAULT_THEME,
-  HUD_FONTS,
-  IMAGERIES,
-  NUMBER_RANGES,
-  parseTheme,
-  type Theme,
-  type ThemeIssue,
-} from '../theme.ts';
+// Toute la logique est côté serveur (`dijkstravel editor`) : il donne le thème complété, les bornes des
+// réglages et le nombre d'images, valide chaque aperçu et chaque enregistrement. Ici, seulement l'interface.
+
+type Issue = { readonly path: string; readonly expected: string };
+
+/** Thème brut modifiable, section par section ; validé par le serveur à chaque aperçu. */
+type Draft = Record<string, Record<string, unknown>>;
+
+/** `GET /editor.json`. */
+type EditorState = {
+  readonly run: { readonly name: string; readonly width: number; readonly height: number; readonly frames: number };
+  readonly theme: Draft;
+  /** Problèmes du thème enregistré, remplacé par les valeurs par défaut. */
+  readonly issues: readonly Issue[];
+  readonly defaults: Draft;
+  readonly ranges: Readonly<Record<string, readonly [number, number]>>;
+  readonly fonts: readonly string[];
+  readonly imageries: readonly string[];
+};
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const isDraft = (raw: unknown): raw is Draft => isRecord(raw) && Object.values(raw).every(isRecord);
+
+const isStrings = (raw: unknown): raw is readonly string[] =>
+  Array.isArray(raw) && raw.every((item) => typeof item === 'string');
+
+const isRange = (raw: unknown): raw is readonly [number, number] =>
+  Array.isArray(raw) && raw.length === 2 && raw.every((item) => typeof item === 'number');
+
+function isEditorState(raw: unknown): raw is EditorState {
+  if (!isRecord(raw)) return false;
+  const { run, theme, issues, defaults, ranges, fonts, imageries } = raw;
+  return (
+    isRecord(run) &&
+    typeof run['name'] === 'string' &&
+    typeof run['width'] === 'number' &&
+    typeof run['height'] === 'number' &&
+    typeof run['frames'] === 'number' &&
+    isDraft(theme) &&
+    isDraft(defaults) &&
+    Array.isArray(issues) &&
+    issues.every(isIssue) &&
+    isRecord(ranges) &&
+    Object.values(ranges).every(isRange) &&
+    isStrings(fonts) &&
+    isStrings(imageries)
+  );
+}
 
 const IMAGERY_LABELS: Readonly<Record<string, string>> = {
   nasa: 'NASA Blue Marble (pays, régions)',
@@ -21,7 +60,7 @@ type Field =
   | { readonly kind: 'color'; readonly path: string; readonly label: string }
   | { readonly kind: 'checkbox'; readonly path: string; readonly label: string }
   | { readonly kind: 'text'; readonly path: string; readonly label: string }
-  | { readonly kind: 'range'; readonly path: keyof typeof NUMBER_RANGES; readonly label: string; readonly step: number }
+  | { readonly kind: 'range'; readonly path: string; readonly label: string; readonly step: number }
   | { readonly kind: 'font'; readonly path: 'hud.font'; readonly label: string }
   | { readonly kind: 'imagery'; readonly path: 'basemap.imagery'; readonly label: string };
 
@@ -113,10 +152,7 @@ function element<T extends HTMLElement>(id: string, type: new () => T): T {
   return found;
 }
 
-/** Thème brut modifiable, section par section ; validé par `parseTheme` à chaque application. */
-type Draft = Record<string, Record<string, unknown>>;
-
-function toDraft(theme: Theme): Draft {
+function toDraft(theme: Draft): Draft {
   return Object.fromEntries(Object.entries(theme).map(([section, values]) => [section, { ...values }]));
 }
 
@@ -133,7 +169,7 @@ function setAt(draft: Draft, path: string, value: unknown): void {
 const formatNumber = (value: number, step: number): string =>
   value.toFixed(step >= 1 ? 0 : (String(step).split('.')[1]?.length ?? 2));
 
-function control(field: Field, draft: Draft, onChange: () => void): HTMLLabelElement {
+function control(field: Field, state: EditorState, draft: Draft, onChange: () => void): HTMLLabelElement {
   const label = document.createElement('label');
   const text = document.createElement('span');
   text.textContent = field.label;
@@ -142,7 +178,7 @@ function control(field: Field, draft: Draft, onChange: () => void): HTMLLabelEle
 
   if (field.kind === 'font' || field.kind === 'imagery') {
     const select = document.createElement('select');
-    const options = field.kind === 'font' ? HUD_FONTS : IMAGERIES;
+    const options = field.kind === 'font' ? state.fonts : state.imageries;
     for (const option of options)
       select.add(new Option(IMAGERY_LABELS[option] ?? option, option, false, option === current));
     select.addEventListener('change', () => {
@@ -175,7 +211,7 @@ function control(field: Field, draft: Draft, onChange: () => void): HTMLLabelEle
       onChange();
     });
   } else {
-    const [min, max] = NUMBER_RANGES[field.path];
+    const [min, max] = state.ranges[field.path] ?? [0, 1];
     const output = document.createElement('output');
     Object.assign(input, { min: String(min), max: String(max), step: String(field.step) });
     input.value = String(current);
@@ -191,13 +227,13 @@ function control(field: Field, draft: Draft, onChange: () => void): HTMLLabelEle
   return label;
 }
 
-function renderControls(container: HTMLElement, draft: Draft, onChange: () => void): void {
+function renderControls(container: HTMLElement, state: EditorState, draft: Draft, onChange: () => void): void {
   container.replaceChildren(
     ...GROUPS.map((group) => {
       const fieldset = document.createElement('fieldset');
       const legend = document.createElement('legend');
       legend.textContent = group.title;
-      fieldset.append(legend, ...group.fields.map((field) => control(field, draft, onChange)));
+      fieldset.append(legend, ...group.fields.map((field) => control(field, state, draft, onChange)));
       return fieldset;
     }),
   );
@@ -218,34 +254,35 @@ async function showPreview(image: HTMLImageElement, draft: Draft, index: number)
   return '';
 }
 
-const isIssue = (raw: unknown): raw is ThemeIssue =>
+const isIssue = (raw: unknown): raw is Issue =>
   isRecord(raw) && typeof raw['path'] === 'string' && typeof raw['expected'] === 'string';
 
-function describe(issues: readonly ThemeIssue[]): string {
+function describe(issues: readonly Issue[]): string {
   return issues.map((issue) => `${issue.path} : ${issue.expected}`).join(' · ');
 }
 
 async function start(): Promise<void> {
-  const [runResponse, themeResponse] = await Promise.all([fetch('/run.json'), fetch('/theme.json')]);
-  const run = parseRun(await runResponse.json());
-  const loaded = parseTheme(await themeResponse.json());
-  if (!run.ok) throw new EditorError('run.json');
+  const response = await fetch('/editor.json');
+  if (!response.ok) throw new EditorError('editor.json');
+  const state: unknown = await response.json();
+  if (!isEditorState(state)) throw new EditorError('editor.json');
   const status = element('status', HTMLDivElement);
-  if (!loaded.ok) status.textContent = `Thème enregistré invalide, valeurs par défaut : ${describe(loaded.errors)}`;
-  let draft = toDraft(loaded.ok ? loaded.value : DEFAULT_THEME);
+  if (state.issues.length > 0)
+    status.textContent = `Thème enregistré invalide, valeurs par défaut : ${describe(state.issues)}`;
+  let draft = toDraft(state.theme);
 
-  const size = VIDEO_SIZES[run.value.video.format];
+  const { run } = state;
   const frame = element('preview', HTMLImageElement);
   const stage = element('stage', HTMLDivElement);
-  Object.assign(frame, { width: String(size.width), height: String(size.height) });
+  Object.assign(frame, { width: String(run.width), height: String(run.height) });
   const fit = (): void => {
-    const scale = Math.min(stage.clientWidth / size.width, stage.clientHeight / size.height);
+    const scale = Math.min(stage.clientWidth / run.width, stage.clientHeight / run.height);
     frame.style.transform = `translateX(-50%) scale(${String(scale)})`;
   };
   new ResizeObserver(fit).observe(stage);
-  element('theme-name', HTMLDivElement).textContent = `Run ${run.value.name}`;
+  element('theme-name', HTMLDivElement).textContent = `Run ${run.name}`;
 
-  const frames = frameCount(timeline(run.value.video));
+  const frames = run.frames;
   const slider = element('frame', HTMLInputElement);
   const frameLabel = element('frame-label', HTMLOutputElement);
   slider.max = String(frames - 1);
@@ -272,12 +309,12 @@ async function start(): Promise<void> {
     void refresh();
   };
   const controls = element('controls', HTMLDivElement);
-  renderControls(controls, draft, onChange);
+  renderControls(controls, state, draft, onChange);
   slider.addEventListener('input', onChange);
 
   element('reset', HTMLButtonElement).addEventListener('click', () => {
-    draft = toDraft(DEFAULT_THEME);
-    renderControls(controls, draft, onChange);
+    draft = toDraft(state.defaults);
+    renderControls(controls, state, draft, onChange);
     onChange();
   });
   element('save', HTMLButtonElement).addEventListener('click', () => {

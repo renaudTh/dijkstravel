@@ -12,4 +12,5 @@ dijkstravel-solve.workspace = true
 dijkstravel-sources.workspace = true
 dotenvy = "0.15"
 serde_json.workspace = true
+tiny_http = "0.12"
 ureq.workspace = true

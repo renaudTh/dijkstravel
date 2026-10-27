@@ -4,3 +4,4 @@ vroom/access.log
 .env
 /target/
 crates/render/tests/fixtures/real/
+editor/dist/

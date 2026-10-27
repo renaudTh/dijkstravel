@@ -1,5 +1,6 @@
 //! `dijkstravel <commande> runs/<nom>` : toute la chaîne, des lieux à la vidéo publiée.
 
+mod editor;
 mod load;
 mod publication;
 mod render;
@@ -50,6 +51,8 @@ enum Command {
     Source(source::Source),
     /// Envoie la vidéo, la couverture et la légende sur Nextcloud (`.env`).
     Upload { run: PathBuf },
+    /// Éditeur du thème du run, sur sa tournée déjà calculée, dans le navigateur.
+    Editor { run: PathBuf },
 }
 
 fn validate(arg: &std::path::Path) -> Outcome {
@@ -67,6 +70,7 @@ fn main() -> ExitCode {
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
         Command::Upload { run } => upload::main(&run),
+        Command::Editor { run } => editor::main(&run),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,

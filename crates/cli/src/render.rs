@@ -43,18 +43,22 @@ impl Scene {
         Ok(Scene { run, paths, tour: Arc::new(tour), title, images, downloader })
     }
 
-    pub fn input(&self, theme: Theme) -> Outcome<Input> {
+    pub fn video(&self) -> Video {
         let video = &self.run.video;
         let (width, height) = video.format.size();
+        Video {
+            width,
+            height,
+            duration_sec: video.duration_sec,
+            intro_sec: video.intro_sec,
+            outro_sec: video.outro_sec,
+            fps: video.fps,
+        }
+    }
+
+    pub fn input(&self, theme: Theme) -> Outcome<Input> {
         Ok(Input {
-            video: Video {
-                width,
-                height,
-                duration_sec: video.duration_sec,
-                intro_sec: video.intro_sec,
-                outro_sec: video.outro_sec,
-                fps: video.fps,
-            },
+            video: self.video(),
             tour_file: self.paths.tour.display().to_string(),
             title: self.title.clone(),
             images: self.images.clone(),
