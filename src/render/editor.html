@@ -147,7 +147,7 @@
         min-height: 0;
         overflow: hidden;
       }
-      /* L'aperçu est la vraie page de rendu, à sa taille vidéo, réduite pour tenir à l'écran. */
+      /* L'aperçu est une image du moteur de rendu, à sa taille vidéo, réduite pour tenir à l'écran. */
       #preview {
         position: absolute;
         top: 0;
@@ -177,7 +177,7 @@
         <input id="frame" type="range" min="0" value="0" aria-label="Image de la vidéo" />
         <output id="frame-label"></output>
       </div>
-      <div id="stage"><iframe id="preview" title="Aperçu du rendu"></iframe></div>
+      <div id="stage"><img id="preview" alt="Aperçu du rendu" /></div>
     </main>
     <script type="module" src="/src/render/editor.ts"></script>
   </body>

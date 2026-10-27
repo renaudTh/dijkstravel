@@ -1,9 +1,8 @@
 import { access, writeFile } from 'node:fs/promises';
 import { readJson } from '../files.ts';
-import { captureCover } from '../render/capture.ts';
 import { frameCount, timeline } from '../render/frame.ts';
-import { servePage } from '../render/server.ts';
-import { runPaths, runPublication, VIDEO_SIZES } from '../run.ts';
+import { prefetchTiles, renderFrame, writeInput } from '../render/native.ts';
+import { runPaths, runPublication } from '../run.ts';
 import { parseTour } from '../solve/tour.ts';
 import { loadRun, loadThemeFile, usage } from './shared.ts';
 
@@ -37,18 +36,11 @@ export async function main(argv: readonly string[]): Promise<number> {
     () => false,
   );
   const cover = `${paths.dir}/cover.jpg`;
-  // Toute dernière image : fin de l'outro, tracé complet dézoomé ; dessinée par la page, sans la carte d'infos.
-  const server = await servePage({ run: runFile, tour: paths.tour, theme, editable: false });
-  try {
-    await captureCover({
-      pageUrl: server.url,
-      size: VIDEO_SIZES[run.video.format],
-      frame: frameCount(timeline(run.video)) - 1,
-      outFile: cover,
-    });
-  } finally {
-    await server.close();
-  }
+  // Toute dernière image : fin de l'outro, tracé complet dézoomé, sans la carte d'infos.
+  const input = await writeInput(runFile, run, theme);
+  const last = frameCount(timeline(run.video)) - 1;
+  await prefetchTiles(input, `--frame=${String(last)}`);
+  await renderFrame(input, last, cover, false);
 
   const text = [
     '=== LÉGENDE (à coller telle quelle) ===',

@@ -1,4 +1,4 @@
-// Partagé par la page (zoom max, crédit) et le serveur de rendu (adresse des tuiles) : aucun import Node ici.
+// Sources de tuiles du moteur de rendu natif : adresse chez le fournisseur, zoom max, crédit à afficher.
 import type { Imagery } from './theme.ts';
 
 /** Fonds satellite : adresse des tuiles chez le fournisseur (`{z}`, `{x}`, `{y}`), zoom max, crédit à afficher. */
@@ -27,3 +27,18 @@ export const IMAGERY_SOURCES = {
     credit: 'Sentinel-2 cloudless by EOX (Copernicus Sentinel data 2016)',
   },
 } as const satisfies Record<Imagery, { tiles: string; maxzoom: number; credit: string }>;
+
+/** Relief (Mapzen Terrain Tiles, encodage Terrarium), d'où le moteur natif tire l'ombrage du fond. */
+export const TERRAIN_SOURCE = {
+  name: 'terrarium',
+  tiles: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
+  maxzoom: 12,
+} as const;
+
+/** Tuiles vectorielles OpenFreeMap (schéma OpenMapTiles) : seules les frontières en sont tirées. */
+export const VECTOR_SOURCE = {
+  name: 'openmaptiles',
+  /** TileJSON : l'adresse des tuiles change à chaque mise à jour de la carte. */
+  tilejson: 'https://tiles.openfreemap.org/planet',
+  maxzoom: 14,
+} as const;

@@ -1,6 +1,7 @@
-// Éditeur de thème : réglages à gauche, la vraie page de rendu en aperçu à droite.
+// Éditeur de thème : réglages à gauche, à droite l'image du moteur de rendu, telle que la vidéo la montrera.
 import { isRecord } from '../narrow.ts';
 import { parseRun, VIDEO_SIZES } from '../run.ts';
+import { frameCount, timeline } from './frame.ts';
 import {
   DEFAULT_THEME,
   HUD_FONTS,
@@ -202,14 +203,23 @@ function renderControls(container: HTMLElement, draft: Draft, onChange: () => vo
   );
 }
 
-async function previewWindow(frame: HTMLIFrameElement): Promise<Window> {
-  // Attente active courte : la page d'aperçu n'expose ses fonctions qu'une fois la carte chargée.
-  for (;;) {
-    const win = frame.contentWindow;
-    if (win !== null && win.frameCount > 0) return win;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+/** Image `index` rendue avec le brouillon ; renvoie le message d'état (vide si tout va bien). */
+async function showPreview(image: HTMLImageElement, draft: Draft, index: number): Promise<string> {
+  const response = await fetch('/preview', { method: 'POST', body: JSON.stringify({ theme: draft, frame: index }) });
+  if (response.status === 400) {
+    const raw: unknown = await response.json();
+    return Array.isArray(raw) ? describe(raw.filter(isIssue)) : 'Aperçu refusé';
   }
+  if (!response.ok) return `Aperçu impossible : ${await response.text()}`;
+  const previous = image.src;
+  image.src = URL.createObjectURL(await response.blob());
+  await image.decode().catch(() => undefined);
+  if (previous.startsWith('blob:')) URL.revokeObjectURL(previous);
+  return '';
 }
+
+const isIssue = (raw: unknown): raw is ThemeIssue =>
+  isRecord(raw) && typeof raw['path'] === 'string' && typeof raw['expected'] === 'string';
 
 function describe(issues: readonly ThemeIssue[]): string {
   return issues.map((issue) => `${issue.path} : ${issue.expected}`).join(' · ');
@@ -225,7 +235,7 @@ async function start(): Promise<void> {
   let draft = toDraft(loaded.ok ? loaded.value : DEFAULT_THEME);
 
   const size = VIDEO_SIZES[run.value.video.format];
-  const frame = element('preview', HTMLIFrameElement);
+  const frame = element('preview', HTMLImageElement);
   const stage = element('stage', HTMLDivElement);
   Object.assign(frame, { width: String(size.width), height: String(size.height) });
   const fit = (): void => {
@@ -233,14 +243,13 @@ async function start(): Promise<void> {
     frame.style.transform = `translateX(-50%) scale(${String(scale)})`;
   };
   new ResizeObserver(fit).observe(stage);
-  frame.src = '/';
   element('theme-name', HTMLDivElement).textContent = `Run ${run.value.name}`;
 
-  const preview = await previewWindow(frame);
+  const frames = frameCount(timeline(run.value.video));
   const slider = element('frame', HTMLInputElement);
   const frameLabel = element('frame-label', HTMLOutputElement);
-  slider.max = String(preview.frameCount - 1);
-  slider.value = String(Math.round(preview.frameCount / 3));
+  slider.max = String(frames - 1);
+  slider.value = String(Math.round(frames / 3));
 
   // Un seul rendu à la fois ; un réglage arrivé pendant un rendu repart avec les dernières valeurs.
   let rendering = false;
@@ -251,10 +260,8 @@ async function start(): Promise<void> {
       return;
     }
     rendering = true;
-    const issues = await preview.applyTheme(draft);
-    status.textContent = issues.length > 0 ? describe(issues) : '';
     frameLabel.textContent = `${slider.value} / ${slider.max}`;
-    await preview.renderFrame(Number(slider.value));
+    status.textContent = await showPreview(frame, draft, Number(slider.value));
     rendering = false;
     if (pending) {
       pending = false;

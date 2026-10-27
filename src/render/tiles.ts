@@ -1,12 +1,10 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { IMAGERY_SOURCES } from '../imagery.ts';
-import { IMAGERIES, type Imagery } from '../theme.ts';
 
 export type Tile = { readonly status: number; readonly body: Buffer; readonly contentType: string };
 
 export type TileOptions = {
-  /** Dossier du cache : `<dossier>/<imagerie>/<z>/<x>/<y>`. */
+  /** Dossier du cache : `<dossier>/<source>/<z>/<x>/<y>`. */
   readonly cacheDir: string;
   /** Essais par tuile, le premier compris. */
   readonly attempts: number;
@@ -25,17 +23,6 @@ export const DEFAULT_TILE_OPTIONS: TileOptions = {
 };
 
 const HEADERS = { 'user-agent': 'dijkstravel/0.1 (outil personnel de cartographie)' };
-
-/** `/imagery/<nom>/<z>/<x>/<y>` → sa tuile ; `null` pour tout autre chemin. */
-export function parseTilePath(
-  pathname: string,
-): { readonly imagery: Imagery; readonly z: number; readonly x: number; readonly y: number } | null {
-  const match = /^\/imagery\/([a-z]+)\/(\d+)\/(\d+)\/(\d+)$/.exec(pathname);
-  if (match === null) return null;
-  const [, name = '', z = '', x = '', y = ''] = match;
-  const imagery = IMAGERIES.find((known) => known === name);
-  return imagery === undefined ? null : { imagery, z: Number(z), x: Number(x), y: Number(y) };
-}
 
 /** File d'attente qui laisse passer `limit` tâches à la fois. */
 export function limiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
@@ -59,21 +46,18 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const retryable = (status: number): boolean => status === 429 || status >= 500;
 
 /**
- * Tuiles d'imagerie, servies par le serveur de rendu au lieu du fournisseur : une tuile en échec
- * (connexion coupée sous la charge des workers) serait comblée par MapLibre avec celle du zoom
- * inférieur, floue, et la jonction se verrait sur la vidéo. Chaque tuile obtenue est gardée sur
- * disque : les rendus suivants n'interrogent plus le fournisseur.
+ * Tuiles d'une source quelconque (imagerie, relief, tuiles vectorielles), téléchargées avant le rendu,
+ * réessayées (connexion coupée, serveur surchargé) et gardées sous `<cacheDir>/<name>/<z>/<x>/<y>` :
+ * le moteur ne lit que le disque, et les rendus suivants n'interrogent plus le fournisseur. `template` (`{z}`, `{x}`, `{y}`) n'est demandé que pour une tuile
+ * absente du cache : une adresse qui se lit sur le réseau (TileJSON) n'est pas requise hors ligne.
  */
-export function tileFetcher(options: TileOptions = DEFAULT_TILE_OPTIONS) {
+export function sourceFetcher(options: TileOptions = DEFAULT_TILE_OPTIONS) {
   const queue = limiter(options.concurrency);
-  return async (imagery: Imagery, z: number, x: number, y: number): Promise<Tile> => {
-    const file = join(options.cacheDir, imagery, String(z), String(x), String(y));
+  return async (name: string, template: () => Promise<string>, z: number, x: number, y: number): Promise<Tile> => {
+    const file = join(options.cacheDir, name, String(z), String(x), String(y));
     const cached = await readFile(file).catch(() => null);
     if (cached !== null) return { status: 200, body: cached, contentType: contentTypeOf(cached) };
-    const url = IMAGERY_SOURCES[imagery].tiles
-      .replace('{z}', String(z))
-      .replace('{x}', String(x))
-      .replace('{y}', String(y));
+    const url = (await template()).replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y));
     let last: Tile = { status: 502, body: Buffer.alloc(0), contentType: 'text/plain' };
     for (let attempt = 0; attempt < options.attempts; attempt++) {
       if (attempt > 0) await sleep(options.retryDelayMs * 2 ** (attempt - 1));
