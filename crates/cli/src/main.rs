@@ -1,6 +1,7 @@
 //! `dijkstravel <commande> runs/<nom>` : toute la chaîne, des lieux à la vidéo publiée.
 
 mod load;
+mod solve;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -23,6 +24,8 @@ enum Command {
         /// `runs/<nom>` ou `runs/<nom>/run.json`.
         run: PathBuf,
     },
+    /// Calcule la tournée (`tour.json`) par OSRM et VROOM.
+    Solve { run: PathBuf },
 }
 
 fn validate(arg: &std::path::Path) -> Outcome {
@@ -35,6 +38,7 @@ fn validate(arg: &std::path::Path) -> Outcome {
 fn main() -> ExitCode {
     let outcome = match Cli::parse().command {
         Command::Validate { run } => validate(&run),
+        Command::Solve { run } => solve::main(&run),
     };
     match outcome {
         Ok(()) => ExitCode::SUCCESS,

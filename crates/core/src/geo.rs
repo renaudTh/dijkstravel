@@ -20,13 +20,20 @@ impl BBox {
 
 const EARTH_RADIUS_METERS: f64 = 6_371_008.8;
 
+/// `(degrés × π) / 180`, dans cet ordre : `f64::to_radians` arrondit autrement, et les distances des
+/// tournées déjà calculées changeraient au dernier chiffre.
+fn radians(degrees: f64) -> f64 {
+    (degrees * std::f64::consts::PI) / 180.0
+}
+
 /// Haversine sur la sphère de rayon moyen.
 pub fn distance_meters(a: LonLat, b: LonLat) -> f64 {
-    let d_lat = (b[1] - a[1]).to_radians();
-    let d_lon = (b[0] - a[0]).to_radians();
-    let h =
-        (d_lat / 2.0).sin().powi(2) + a[1].to_radians().cos() * b[1].to_radians().cos() * (d_lon / 2.0).sin().powi(2);
-    2.0 * EARTH_RADIUS_METERS * h.sqrt().min(1.0).asin()
+    let d_lat = radians(b[1] - a[1]);
+    let d_lon = radians(b[0] - a[0]);
+    // fdlibm (`libm`) comme V8 : la libm du système arrondit parfois autrement au dernier bit.
+    let h = libm::sin(d_lat / 2.0).powi(2)
+        + libm::cos(radians(a[1])) * libm::cos(radians(b[1])) * libm::sin(d_lon / 2.0).powi(2);
+    2.0 * EARTH_RADIUS_METERS * libm::asin(h.sqrt().min(1.0))
 }
 
 /// `meters[i]` est la distance parcourue en arrivant à `points[i]`.
