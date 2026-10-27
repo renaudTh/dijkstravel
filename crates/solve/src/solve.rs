@@ -40,7 +40,7 @@ impl std::fmt::Display for SolveError {
 
 impl std::error::Error for SolveError {}
 
-pub fn solve_tour(run: &Run, places: &[Place], routing: &impl Routing) -> Result<Tour, SolveError> {
+pub fn solve_tour(run: &Run, places: &[Place], routing: &(impl Routing + ?Sized)) -> Result<Tour, SolveError> {
     let start_place = match &run.start {
         Start::Place(id) => Some(
             places.iter().position(|place| place.id == *id).ok_or_else(|| SolveError::UnknownStartPlace(id.clone()))?,
