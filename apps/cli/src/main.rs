@@ -38,6 +38,9 @@ enum Command {
         /// Ne rend que les n premières secondes, pour itérer vite.
         #[arg(long)]
         seconds: Option<f64>,
+        /// Durée du trajet en secondes, à la place de `durationSec` ; écrit `video-<n>s.mp4`.
+        #[arg(long)]
+        duration: Option<f64>,
         /// Threads de rendu (tous les cœurs par défaut).
         #[arg(long)]
         threads: Option<usize>,
@@ -67,7 +70,9 @@ fn main() -> ExitCode {
     let outcome = match Cli::parse().command {
         Command::Validate { run } => validate(&run),
         Command::Solve { run } => solve::main(&run),
-        Command::Render { run, seconds, threads, frame } => render::main(&run, seconds, threads, frame),
+        Command::Render { run, seconds, duration, threads, frame } => {
+            render::main(&run, seconds, duration, threads, frame)
+        }
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
         Command::Upload { run } => upload::main(&run),

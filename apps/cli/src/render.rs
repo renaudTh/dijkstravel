@@ -1,5 +1,6 @@
 //! `dijkstravel render runs/<nom>` → `data/out/<nom>/video.mp4`, par le moteur natif (sans GPU), à
 //! partir du seul `tour.json`. Tout ce que lit le moteur est téléchargé avant, dans `data/cache/`.
+//! `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4`.
 
 use std::path::Path;
 
@@ -14,7 +15,15 @@ pub const CACHE_DIR: &str = "data/cache";
 
 /// La scène du run, depuis ses fichiers ; les images de lieux introuvables sont signalées.
 pub fn scene(arg: &Path) -> Outcome<(Scene, RunPaths)> {
-    let (run, paths) = load::run(arg)?;
+    scene_lasting(arg, None)
+}
+
+/// `duration` remplace la durée du trajet (`durationSec`) du run ; l'intro et la fin ne changent pas.
+fn scene_lasting(arg: &Path, duration: Option<f64>) -> Outcome<(Scene, RunPaths)> {
+    let (mut run, paths) = load::run(arg)?;
+    if let Some(duration) = duration {
+        run.video.duration_sec = duration;
+    }
     if !paths.tour.exists() {
         return fail(format!(
             "{} absent : calculer la tournée d'abord (`dijkstravel solve {}`).",
@@ -41,11 +50,18 @@ pub fn write_image(image: &Image, out: &Path) -> Outcome {
     load::write_file(out, bytes)
 }
 
-pub fn main(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: Option<u32>) -> Outcome {
-    if seconds.is_some_and(|seconds| seconds.is_nan() || seconds <= 0.0) || threads == Some(0) {
-        return fail("--seconds attend un nombre > 0, --threads un entier > 0");
+pub fn main(
+    arg: &Path,
+    seconds: Option<f64>,
+    duration: Option<f64>,
+    threads: Option<usize>,
+    frame: Option<u32>,
+) -> Outcome {
+    let positive = |value: Option<f64>| value.is_none_or(|value| value.is_finite() && value > 0.0);
+    if !positive(seconds) || !positive(duration) || threads == Some(0) {
+        return fail("--seconds et --duration attendent un nombre > 0, --threads un entier > 0");
     }
-    let (scene, paths) = scene(arg)?;
+    let (scene, paths) = scene_lasting(arg, duration)?;
     let renderer = scene.renderer(load::theme(&scene.run)?, None)?;
     std::fs::create_dir_all(&paths.out)?;
     let console = console(&scene);
@@ -56,7 +72,8 @@ pub fn main(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: Opt
         return Ok(());
     }
     let threads = threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
-    scene.encode_video(&renderer, seconds, threads, &paths.video.display().to_string(), &console)?;
-    println!("{}", paths.video.display());
+    let video = duration.map_or(paths.video, |duration| paths.out.join(format!("video-{duration}s.mp4")));
+    scene.encode_video(&renderer, seconds, threads, &video.display().to_string(), &console)?;
+    println!("{}", video.display());
     Ok(())
 }
