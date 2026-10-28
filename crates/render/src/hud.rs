@@ -158,8 +158,11 @@ impl Hud {
         let theme = &self.theme;
         let size = theme.size as f32;
         let portrait = self.height > self.width;
-        let (side, top) = if portrait { (0.05, 0.09) } else { (0.03, 0.03) };
-        let (left, top) = (self.width * side, self.height * top);
+        let (left, top) = if portrait {
+            (self.width * 0.05, self.height * PORTRAIT_TOP / 1920.0)
+        } else {
+            (self.width * 0.03, self.height * 0.03)
+        };
         let card_width = self.width - 2.0 * left;
         let (pad_x, pad_y) = (0.8 * size, 0.6 * size);
         let inner = card_width - 2.0 * pad_x;
@@ -308,6 +311,10 @@ struct Pill {
 }
 
 /// `Intl.NumberFormat('fr-FR')` : milliers séparés par une espace fine insécable.
+/// Marge haute en vertical, en pixels d'une vidéo 1080 × 1920 : TikTok pose ses onglets et sa barre de
+/// recherche au-dessus de la vidéo.
+const PORTRAIT_TOP: f32 = 250.0;
+
 fn group_thousands(value: i64) -> String {
     let digits = value.unsigned_abs().to_string();
     let mut out = String::new();
