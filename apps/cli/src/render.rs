@@ -2,7 +2,7 @@
 //! partir du seul `tour.json`. Tout ce que lit le moteur est téléchargé avant, dans `data/cache/`.
 //! `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use dijkstravel_render::download::Downloader;
 use dijkstravel_render::render::{Image, encode};
@@ -40,6 +40,11 @@ fn scene_lasting(arg: &Path, duration: Option<f64>) -> Outcome<(Scene, RunPaths)
     Ok((scene, paths))
 }
 
+/// `video.mp4`, ou la variante `video-<n>s.mp4` d'une durée de trajet forcée.
+pub fn video_file(paths: &RunPaths, duration: Option<f64>) -> PathBuf {
+    duration.map_or_else(|| paths.video.clone(), |duration| paths.out.join(format!("video-{duration}s.mp4")))
+}
+
 pub fn console(scene: &Scene) -> Console {
     Console { fps: scene.run.video.fps }
 }
@@ -72,7 +77,7 @@ pub fn main(
         return Ok(());
     }
     let threads = threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
-    let video = duration.map_or(paths.video, |duration| paths.out.join(format!("video-{duration}s.mp4")));
+    let video = video_file(&paths, duration);
     scene.encode_video(&renderer, seconds, threads, &video.display().to_string(), &console)?;
     println!("{}", video.display());
     Ok(())

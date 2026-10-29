@@ -54,7 +54,12 @@ enum Command {
     #[command(subcommand)]
     Source(source::Source),
     /// Envoie la vidéo, la couverture et la légende sur Nextcloud (`.env`).
-    Upload { run: PathBuf },
+    Upload {
+        run: PathBuf,
+        /// Envoie la variante `video-<n>s.mp4` (`render --duration n`) à la place de `video.mp4`.
+        #[arg(long)]
+        duration: Option<f64>,
+    },
     /// Éditeur du thème du run, sur sa tournée déjà calculée, dans le navigateur.
     Editor { run: PathBuf },
 }
@@ -75,7 +80,7 @@ fn main() -> ExitCode {
         }
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
-        Command::Upload { run } => upload::main(&run),
+        Command::Upload { run, duration } => upload::main(&run, duration),
         Command::Editor { run } => editor::main(&run),
     };
     match outcome {

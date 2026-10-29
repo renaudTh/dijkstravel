@@ -1,5 +1,6 @@
 //! `dijkstravel upload runs/<nom>` : envoie la vidéo, la couverture et `publication.txt` du run dans
 //! `Documents/dijkstravel/<nom>/` du Nextcloud décrit dans `.env` (fichiers déjà présents remplacés).
+//! `--duration n` envoie la variante `video-<n>s.mp4` à la place de `video.mp4`.
 
 use std::path::{Path, PathBuf};
 
@@ -7,6 +8,7 @@ use base64::Engine;
 use ureq::http::{Method, Request};
 
 use crate::load::{self, Outcome, fail};
+use crate::render;
 
 /// Dossier Nextcloud qui reçoit un sous-dossier par run.
 const REMOTE_ROOT: [&str; 2] = ["Documents", "dijkstravel"];
@@ -87,19 +89,21 @@ impl Connection {
     }
 }
 
-pub fn main(arg: &Path) -> Outcome {
+pub fn main(arg: &Path, duration: Option<f64>) -> Outcome {
     let Some(nextcloud) = connection() else {
         return fail("NEXTCLOUD_URL, NEXTCLOUD_USER et NEXTCLOUD_APP_PASSWORD attendus dans .env");
     };
     let (run, paths) = load::run(arg)?;
-    if !paths.video.exists() {
+    let video = render::video_file(&paths, duration);
+    if !video.exists() {
+        let option = duration.map(|duration| format!(" --duration {duration}")).unwrap_or_default();
         return fail(format!(
-            "{} absente : rendre la vidéo d'abord (dijkstravel render {}).",
-            paths.video.display(),
+            "{} absente : rendre la vidéo d'abord (dijkstravel render {}{option}).",
+            video.display(),
             arg.display()
         ));
     }
-    let files: Vec<PathBuf> = [paths.video.clone(), paths.out.join("cover.jpg"), paths.out.join("publication.txt")]
+    let files: Vec<PathBuf> = [video, paths.out.join("cover.jpg"), paths.out.join("publication.txt")]
         .into_iter()
         .filter(|file| file.exists())
         .collect();
