@@ -44,6 +44,6 @@
     "showLastStop": true
   },
   "camera": {
-    "stopSlowdown": 1.2
+    "stopSlowdown": 3
   }
 }
