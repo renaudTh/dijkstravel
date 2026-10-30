@@ -4,7 +4,6 @@
 
 use skia_safe::{Canvas, Color, Paint, Rect};
 
-use crate::color::parse_color;
 use crate::frame::Camera;
 use crate::geo::LonLat;
 use crate::mercator::{View, project, unproject};
@@ -15,6 +14,9 @@ use crate::sprites::{Fonts, Label};
 /// Taille du nom des villes sur le plan large, en pixels.
 const CITY_LABEL_SIZE: f32 = 40.0;
 const CITY_DOT_RADIUS: f32 = 9.0;
+/// La ville où l'on va : en blanc comme les autres, plus grande ; les autres un peu estompées.
+const NEXT_CITY_LABEL_SIZE: f32 = 48.0;
+const OTHER_CITY_OPACITY: f32 = 0.7;
 /// Courbure du vol (`rho` de van Wijk et Nuij, `curve` du `flyTo` de MapLibre, qui prend 1,42) : plus
 /// elle est forte, plus la caméra monte avant de traverser.
 const FLIGHT_CURVE: f64 = 1.6;
@@ -43,27 +45,24 @@ pub struct Montage {
     /// Images de chaque vol entre deux segments.
     transition: u32,
     cities: Vec<CityMark>,
-    /// Point des villes, et celui de la ville où l'on va.
-    colors: (Color, Color),
 }
 
 impl Montage {
     /// `parts` : au moins un rendu, tous au même format et au même thème ; `cities` : une par segment.
     pub fn new(parts: Vec<Renderer>, cities: Vec<City>, transition: u32) -> Montage {
         assert!(!parts.is_empty(), "un montage sans segment");
-        let (normal, highlight) = (Color::WHITE, parse_color(&parts[0].input.theme.hud.title_color));
         let halo = Color::from_argb(220, 0, 0, 0);
         let fonts = Fonts::new();
         let cities = cities
             .into_iter()
             .map(|city| CityMark {
                 at: city.at,
-                label: fonts.label(&city.name, CITY_LABEL_SIZE, normal, halo),
-                highlighted: fonts.label(&city.name, CITY_LABEL_SIZE, highlight, halo),
+                label: fonts.label(&city.name, CITY_LABEL_SIZE, Color::WHITE, halo),
+                highlighted: fonts.label(&city.name, NEXT_CITY_LABEL_SIZE, Color::WHITE, halo),
             })
             .collect();
         let starts = layout(&parts.iter().map(Frames::frame_count).collect::<Vec<_>>(), transition);
-        Montage { parts, starts, transition, cities, colors: (normal, highlight) }
+        Montage { parts, starts, transition, cities }
     }
 
     /// Où tombe `frame` : dans le segment `index`, ou dans le saut qui le suit.
@@ -81,26 +80,31 @@ impl Montage {
     /// La caméra du vol après le segment `from`, et le segment dont le fond se dessine : celui qu'on
     /// quitte jusqu'au milieu du vol, en vue d'avion, puis celui où l'on arrive.
     fn jump_camera(&self, from: usize, progress: f64) -> (usize, Camera) {
-        let t = ease_in_out(progress);
+        let t = ease_flight(progress);
         let camera = fly(self.parts[from].last_camera(), self.parts[from + 1].first_camera(), t);
         (if progress < 0.5 { from } else { from + 1 }, camera)
     }
 
-    /// Le point et le nom de chaque ville ; celle de `next` dans la couleur du titre.
+    /// Le point et le nom de chaque ville ; celle de `next` plus grande, les autres estompées.
     fn draw_cities(&self, canvas: &Canvas, camera: Camera, next: usize, opacity: f32) {
         let video = self.video();
         let view = View::new(camera.center, camera.zoom, camera.zoom, video.width, video.height);
         let mut dot = Paint::default();
-        dot.set_anti_alias(true);
+        dot.set_anti_alias(true).set_color(Color::WHITE);
+        let mut halo = Paint::default();
+        halo.set_anti_alias(true).set_color(Color::from_argb(220, 0, 0, 0));
         let mut text = Paint::default();
-        text.set_alpha_f(opacity);
         let mut placed: Vec<Rect> = Vec::new();
         for (i, city) in self.cities.iter().enumerate() {
             let [x, y] = view.to_screen(city.at);
             let (x, y, current) = (x as f32, y as f32, i == next);
-            dot.set_color(if current { self.colors.1 } else { self.colors.0 });
-            dot.set_alpha_f(opacity);
-            canvas.draw_circle((x, y), CITY_DOT_RADIUS * if current { 1.4 } else { 1.0 }, &dot);
+            let alpha = opacity * if current { 1.0 } else { OTHER_CITY_OPACITY };
+            let radius = CITY_DOT_RADIUS * if current { 1.5 } else { 1.0 };
+            halo.set_alpha_f(alpha * 0.86);
+            canvas.draw_circle((x, y), radius + 2.5, &halo);
+            dot.set_alpha_f(alpha);
+            canvas.draw_circle((x, y), radius, &dot);
+            text.set_alpha_f(alpha);
             let Some(label) = (if current { &city.highlighted } else { &city.label }) else { continue };
             // À droite du point, sinon à gauche s'il chevauche un nom déjà posé.
             let gap = CITY_DOT_RADIUS * 2.0;
@@ -181,8 +185,12 @@ fn progress_of(index: u32, count: u32) -> f64 {
     if count <= 1 { 1.0 } else { f64::from(index) / f64::from(count - 1) }
 }
 
-fn ease_in_out(t: f64) -> f64 {
-    if t < 0.5 { 4.0 * t * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0 }
+/// Départ avec de l'élan (vitesse 1, la caméra ne traîne pas sur la ville quittée), arrivée en douceur
+/// (vitesse 0) : moyenne d'une courbe qui ralentit et d'une qui accélère puis ralentit.
+fn ease_flight(t: f64) -> f64 {
+    let out = 1.0 - (1.0 - t).powi(2);
+    let in_out = if t < 0.5 { 4.0 * t * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0 };
+    (out + in_out) / 2.0
 }
 
 /// Vol de `from` (t = 0) à `to` (t = 1) : zoom et déplacement mêlés sur le chemin le plus court perçu
@@ -220,6 +228,13 @@ mod tests {
     fn segments_are_separated_by_the_jump() {
         assert_eq!(layout(&[240, 240, 210], 90), vec![0, 330, 660]);
         assert_eq!(layout(&[90], 90), vec![0]);
+    }
+
+    #[test]
+    fn a_flight_leaves_with_momentum_and_lands_softly() {
+        assert_eq!((ease_flight(0.0), ease_flight(1.0)), (0.0, 1.0));
+        let speed = |t: f64| (ease_flight(t + 1e-6) - ease_flight(t)) / 1e-6;
+        assert!((speed(0.0) - 1.0).abs() < 1e-3 && speed(1.0 - 1e-6).abs() < 1e-3);
     }
 
     #[test]
