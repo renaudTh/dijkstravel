@@ -67,6 +67,9 @@ pub struct StopsTheme {
 pub struct BasemapTheme {
     /// Une de `IMAGERIES`.
     pub imagery: String,
+    /// Une de `IMAGERIES`, ou rien : dessinée sous `imagery`, elle se voit là où celle-ci n'a rien, en
+    /// mer pour l'IGN, dont les pixels blancs deviennent alors transparents.
+    pub sea_imagery: String,
     pub brightness: f64,
     pub contrast: f64,
     pub saturation: f64,
@@ -113,6 +116,9 @@ pub struct CameraTheme {
 /// Imagerie du fond : `nasa` (Blue Marble, pays et régions), `ign` (orthophoto, villes de France),
 /// `sentinel` (Sentinel-2 cloudless, monde entier mer comprise : îles et littoraux).
 pub const IMAGERIES: [&str; 3] = ["nasa", "ign", "sentinel"];
+
+/// `IMAGERIES`, ou aucune (`""`) sous l'imagerie principale.
+pub const SEA_IMAGERIES: [&str; 4] = ["", "nasa", "ign", "sentinel"];
 
 /// Polices arrondies de Google Fonts proposées dans l'éditeur.
 pub const HUD_FONTS: [&str; 6] = ["Nunito", "Quicksand", "Fredoka", "Baloo 2", "Poppins", "Comfortaa"];
@@ -170,6 +176,7 @@ impl Default for Theme {
             },
             basemap: BasemapTheme {
                 imagery: s("nasa"),
+                sea_imagery: s(""),
                 brightness: 0.06,
                 contrast: 0.15,
                 saturation: 0.15,
@@ -299,6 +306,7 @@ impl Theme {
             },
             basemap: BasemapTheme {
                 imagery: r.choice("basemap.imagery", &d.basemap.imagery, &IMAGERIES),
+                sea_imagery: r.choice("basemap.seaImagery", &d.basemap.sea_imagery, &SEA_IMAGERIES),
                 brightness: r.number("basemap.brightness", d.basemap.brightness),
                 contrast: r.number("basemap.contrast", d.basemap.contrast),
                 saturation: r.number("basemap.saturation", d.basemap.saturation),

@@ -15,6 +15,8 @@ pub struct Input {
     /// Image de chaque lieu qui en a une : identifiant du lieu → fichier.
     pub images: HashMap<String, String>,
     pub imagery: ImagerySource,
+    /// Sous `imagery`, visible là où elle n'a rien (`basemap.seaImagery`).
+    pub sea_imagery: Option<ImagerySource>,
     /// Relief (Terrarium) d'où vient l'ombrage.
     pub terrain: TileSource,
     /// Tuiles vectorielles d'où viennent les frontières.

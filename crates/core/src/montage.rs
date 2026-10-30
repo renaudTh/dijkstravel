@@ -73,7 +73,6 @@ impl Montage {
         let transition_sec =
             number(video, "transitionSec", TRANSITION_SEC, "video.transitionSec", &mut issues, |n| n >= 0.0);
 
-
         let mut segments = Vec::new();
         match get("segments").and_then(Value::as_array).filter(|list| !list.is_empty()) {
             None => issues.push(Issue::new("segments", "liste non vide")),

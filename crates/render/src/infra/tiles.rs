@@ -1,6 +1,6 @@
 //! Tuiles raster lues dans le cache disque que remplit `download` avant le rendu : le moteur ne
 //! télécharge rien, une tuile absente (hors couverture) est simplement transparente. L'IGN peint la mer
-//! en blanc : dans une tuile surtout blanche, ce blanc devient transparent et le fond du thème le remplace.
+//! en blanc : dans une tuile assez blanche, ce blanc devient transparent et ce qui est dessous se voit.
 
 use std::path::PathBuf;
 
@@ -21,6 +21,8 @@ pub struct TileStore {
     pub maxzoom: u8,
     dir: PathBuf,
     decoded: Lru<TileKey, Option<Image>>,
+    /// Part de blanc à partir de laquelle une tuile perd son blanc (la mer de l'IGN) ; jamais si absente.
+    sea_share: Option<f64>,
 }
 
 /// Tuiles décodées gardées : 256 Ko chacune, environ 256 Mo.
@@ -33,7 +35,13 @@ impl TileStore {
             maxzoom,
             dir: PathBuf::from(cache_dir).join(name),
             decoded: Lru::new(DECODED_TILES),
+            sea_share: Some(DEFAULT_SEA_SHARE),
         }
+    }
+
+    pub fn sea_share(mut self, share: Option<f64>) -> Self {
+        self.sea_share = share;
+        self
     }
 
     pub fn get(&self, key: TileKey) -> Option<Image> {
@@ -42,7 +50,10 @@ impl TileStore {
             let bytes = std::fs::read(file).ok()?;
             // Décodée tout de suite (une image encodée serait redécodée à chaque dessin), mipmaps comprises.
             let image = Image::from_encoded(Data::new_copy(&bytes))?.make_raster_image(None, None)?;
-            let image = without_sea(image)?;
+            let image = match self.sea_share {
+                Some(share) => without_sea(image, share)?,
+                None => image,
+            };
             Some(image.with_default_mipmaps().unwrap_or(image))
         })
     }
@@ -54,12 +65,13 @@ impl TileStore {
 
 /// Pixel de mer de l'IGN : blanc, aux artefacts JPEG près.
 const SEA_WHITE: u8 = 240;
-/// Part de pixels blancs au-delà de laquelle une tuile montre surtout la mer, et pas de la neige ou un toit.
-const SEA_SHARE: f64 = 0.5;
+/// Part de pixels blancs au-delà de laquelle une tuile montre surtout la mer, et pas de la neige ou un
+/// toit : sans rien dessous, effacer la neige y ferait un trou.
+pub const DEFAULT_SEA_SHARE: f64 = 0.5;
 
-/// La tuile, ses pixels de mer rendus transparents si elle en est surtout faite ; rien si elle n'est
+/// La tuile, ses pixels blancs rendus transparents s'ils en font au moins `share` ; rien si elle n'est
 /// que mer.
-fn without_sea(image: Image) -> Option<Image> {
+fn without_sea(image: Image, share: f64) -> Option<Image> {
     let (width, height) = (image.width(), image.height());
     let info = ImageInfo::new((width, height), ColorType::RGBA8888, AlphaType::Premul, None);
     let row_bytes = width as usize * 4;
@@ -69,7 +81,7 @@ fn without_sea(image: Image) -> Option<Image> {
     }
     let is_sea = |pixel: &[u8; 4]| pixel[..3].iter().all(|&byte| byte >= SEA_WHITE);
     let (all, sea) = (pixels.len() / 4, pixels.as_chunks::<4>().0.iter().filter(|pixel| is_sea(pixel)).count());
-    if (sea as f64) < SEA_SHARE * all as f64 {
+    if sea == 0 || (sea as f64) < share * all as f64 {
         return Some(image);
     }
     // Quelques pixels qui bavent ne font pas une côte.
@@ -88,18 +100,18 @@ fn without_sea(image: Image) -> Option<Image> {
 mod tests {
     use skia_safe::{Color, Paint, surfaces};
 
-    use super::without_sea;
+    use super::{DEFAULT_SEA_SHARE, without_sea};
 
     #[test]
     fn sea_turns_transparent_but_land_stays() {
         let mut surface = surfaces::raster_n32_premul((16, 16)).unwrap();
         surface.canvas().clear(Color::WHITE);
-        assert!(without_sea(surface.image_snapshot()).is_none());
+        assert!(without_sea(surface.image_snapshot(), DEFAULT_SEA_SHARE).is_none());
         // Une côte : la moitié gauche est de la terre.
         let mut land = Paint::default();
         land.set_color(Color::from_rgb(60, 80, 40));
         surface.canvas().draw_rect(skia_safe::Rect::from_xywh(0.0, 0.0, 6.0, 16.0), &land);
-        let coast = without_sea(surface.image_snapshot()).unwrap();
+        let coast = without_sea(surface.image_snapshot(), DEFAULT_SEA_SHARE).unwrap();
         let pixel = |image: &skia_safe::Image, x: i32| {
             let mut out = [0u8; 4];
             let info =
@@ -114,6 +126,6 @@ mod tests {
         let mut snow = Paint::default();
         snow.set_color(Color::WHITE);
         surface.canvas().draw_rect(skia_safe::Rect::from_xywh(0.0, 0.0, 4.0, 16.0), &snow);
-        assert_eq!(pixel(&without_sea(surface.image_snapshot()).unwrap(), 2), [255, 255, 255, 255]);
+        assert_eq!(pixel(&without_sea(surface.image_snapshot(), DEFAULT_SEA_SHARE).unwrap(), 2), [255, 255, 255, 255]);
     }
 }

@@ -58,6 +58,9 @@ impl Scene {
             title: self.title.clone(),
             images: self.images.clone(),
             imagery: download::imagery_source(&theme.basemap.imagery),
+            sea_imagery: Some(theme.basemap.sea_imagery.as_str())
+                .filter(|name| !name.is_empty())
+                .map(download::imagery_source),
             terrain: download::terrain_source(),
             vector: download::vector_source(),
             tile_dir: self.downloader.tile_dir().display().to_string(),

@@ -16,7 +16,7 @@ use crate::frame::Camera;
 use crate::hillshade::Hillshade;
 use crate::mercator::{View, world_size};
 use crate::model::{BasemapTheme, ImagerySource, Input, TileSource};
-use crate::tiles::{TileKey, TileStore};
+use crate::tiles::{DEFAULT_SEA_SHARE, TileKey, TileStore};
 
 const CHUNK: i32 = 512;
 /// Bordure dessinée en plus autour d'un morceau : le filtrage bilinéaire lit les pixels voisins.
@@ -37,6 +37,7 @@ pub struct Atlas {
     depends_on: (u64, BasemapTheme, ImagerySource, TileSource, TileSource, String),
     travel_zoom: f64,
     imagery: TileStore,
+    sea_imagery: Option<TileStore>,
     hillshade: Hillshade,
     borders: Option<Borders>,
     adjust: ColorFilter,
@@ -65,7 +66,14 @@ impl Atlas {
                 input.tile_dir.clone(),
             ),
             travel_zoom,
-            imagery: TileStore::new(dir, &input.imagery.name, input.imagery.maxzoom),
+            // Avec une imagerie dessous, tout le blanc de l'IGN s'efface (la neige y reste blanche) ;
+            // sans, seulement celui des tuiles surtout faites de mer.
+            imagery: TileStore::new(dir, &input.imagery.name, input.imagery.maxzoom)
+                .sea_share(Some(if input.sea_imagery.is_some() { 0.0 } else { DEFAULT_SEA_SHARE })),
+            sea_imagery: input
+                .sea_imagery
+                .as_ref()
+                .map(|sea| TileStore::new(dir, &sea.name, sea.maxzoom).sea_share(None)),
             hillshade: Hillshade::new(dir, &terrain.name, terrain.maxzoom, basemap.hillshade),
             borders: basemap
                 .borders
@@ -177,8 +185,8 @@ impl Atlas {
     }
 
     /// Zoom des tuiles raster de MapLibre (`coveringZoomLevel`, arrondi, tuiles de 256), borné par la source.
-    fn tile_zoom(&self, level: u32) -> u8 {
-        ((self.level_zoom(level) + 1.0).round().max(0.0) as u8).min(self.imagery.maxzoom)
+    fn tile_zoom_of(&self, store: &TileStore, level: u32) -> u8 {
+        ((self.level_zoom(level) + 1.0).round().max(0.0) as u8).min(store.maxzoom)
     }
 
     /// Pixels monde (au zoom du niveau) que couvre un morceau, bordure comprise : `[x0, y0, x1, y1]`.
@@ -189,8 +197,9 @@ impl Atlas {
         [x0, y0, x0 + f64::from(CHUNK + 2 * APRON), y0 + f64::from(CHUNK + 2 * APRON)]
     }
 
-    fn imagery_tiles(&self, key: ChunkKey) -> Vec<TileKey> {
-        let z = self.tile_zoom(key.level);
+    /// Tuiles de `store` qui couvrent un morceau, au zoom du niveau borné par celui de la source.
+    fn tiles_from(&self, store: &TileStore, key: ChunkKey) -> Vec<TileKey> {
+        let z = self.tile_zoom_of(store, key.level);
         let tile = world_size(self.level_zoom(key.level)) / f64::from(1u32 << z);
         let count = 1i64 << z;
         let [x0, y0, x1, y1] = Self::bounds(key);
@@ -209,7 +218,10 @@ impl Atlas {
         let zoom = self.level_zoom(key.level);
         let [x0, y0, x1, y1] = Self::bounds(key);
         let mut tiles: BTreeSet<String> =
-            self.imagery_tiles(key).into_iter().map(|t| name(&self.imagery.name, t)).collect();
+            self.tiles_from(&self.imagery, key).into_iter().map(|t| name(&self.imagery.name, t)).collect();
+        if let Some(sea) = &self.sea_imagery {
+            tiles.extend(self.tiles_from(sea, key).into_iter().map(|t| name(&sea.name, t)));
+        }
         if self.hillshade.enabled() {
             tiles.extend(self.hillshade.tiles_for(zoom, x0, y0, x1, y1).into_iter().map(|t| name("terrarium", t)));
         }
@@ -232,17 +244,19 @@ impl Atlas {
         canvas.clear(self.background);
         let zoom = self.level_zoom(key.level);
         let [x0, y0, ..] = Self::bounds(key);
-        let tile_size = world_size(zoom) / f64::from(1u32 << self.tile_zoom(key.level));
         let mut paint = Paint::default();
         paint.set_color_filter(self.adjust.clone());
         // Comme MapLibre : bilinéaire, mipmap la plus proche en réduction (`LINEAR_MIPMAP_NEAREST`).
         let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Nearest);
-        for tile in self.imagery_tiles(key) {
-            let Some(image) = self.imagery.get(tile) else { continue };
-            let left = f64::from(tile.x) * tile_size - x0;
-            let top = f64::from(tile.y) * tile_size - y0;
-            let dest = Rect::from_xywh(left as f32, top as f32, tile_size as f32, tile_size as f32);
-            canvas.draw_image_rect_with_sampling_options(&image, None, dest, sampling, &paint);
+        for store in self.sea_imagery.iter().chain([&self.imagery]) {
+            let tile_size = world_size(zoom) / f64::from(1u32 << self.tile_zoom_of(store, key.level));
+            for tile in self.tiles_from(store, key) {
+                let Some(image) = store.get(tile) else { continue };
+                let left = f64::from(tile.x) * tile_size - x0;
+                let top = f64::from(tile.y) * tile_size - y0;
+                let dest = Rect::from_xywh(left as f32, top as f32, tile_size as f32, tile_size as f32);
+                canvas.draw_image_rect_with_sampling_options(&image, None, dest, sampling, &paint);
+            }
         }
         if self.hillshade.enabled()
             && let Some(shade) = self.hillshade.render(zoom, [x0, y0], side as usize, side as usize)
