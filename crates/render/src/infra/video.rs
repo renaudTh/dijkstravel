@@ -10,21 +10,20 @@ use std::sync::{Condvar, Mutex, mpsc};
 use skia_safe::ColorType;
 
 use crate::monitor::{CANCELLED, Monitor, Stage};
-use crate::render::Renderer;
+use crate::render::Frames;
 
 /// Images rendues d'avance par thread au plus : borne la mémoire quand une image tarde.
 const AHEAD_PER_THREAD: u32 = 2;
 
 /// Les `frames` premières images, encodées dans `out` (MP4 H.264).
 pub fn encode_video(
-    renderer: &Renderer,
+    renderer: &dyn Frames,
     frames: u32,
     threads: usize,
     out: &str,
     monitor: &dyn Monitor,
 ) -> Result<(), String> {
-    let (width, height) = (renderer.input.video.width, renderer.input.video.height);
-    let fps = renderer.input.video.fps;
+    let (width, height, fps) = (renderer.video().width, renderer.video().height, renderer.video().fps);
     let mut ffmpeg = Command::new("ffmpeg")
         .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "yuv420p"])
         .args(["-s", &format!("{width}x{height}"), "-r", &fps.to_string(), "-i", "-"])

@@ -1,8 +1,9 @@
-//! Noyau partagé du domaine : run, lieux, thème, tournée, publication et leur géométrie. Aucune
+//! Noyau partagé du domaine : run, montage, lieux, thème, tournée, publication et leur géométrie. Aucune
 //! entrée-sortie : les apps chargent, ce noyau valide et calcule.
 
 pub mod geo;
 pub mod json;
+pub mod montage;
 pub mod places;
 pub mod publication;
 pub mod run;

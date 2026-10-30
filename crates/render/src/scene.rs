@@ -14,7 +14,7 @@ use crate::download::{self, Downloader};
 use crate::frame::Timeline;
 use crate::model::{Input, Video};
 use crate::monitor::Monitor;
-use crate::render::Renderer;
+use crate::render::{Frames, Renderer};
 use crate::video;
 
 pub struct Scene {
@@ -71,10 +71,11 @@ impl Scene {
         Ok(Renderer::new(self.input(theme)?, self.tour.clone(), previous))
     }
 
-    /// Télécharge les tuiles que liront les images `frames`.
+    /// Télécharge dans le cache de la scène les tuiles que liront les images `frames` d'un rendu, celui
+    /// de la scène ou un montage dont elle fait partie.
     pub fn prefetch(
         &self,
-        renderer: &Renderer,
+        renderer: &dyn Frames,
         frames: std::ops::Range<u32>,
         monitor: &dyn Monitor,
     ) -> Result<(), String> {
@@ -84,7 +85,7 @@ impl Scene {
     /// L'image `frame` (la dernière au-delà), tuiles téléchargées avant ; `with_hud` : avec la carte d'infos.
     pub fn still(
         &self,
-        renderer: &Renderer,
+        renderer: &dyn Frames,
         frame: u32,
         with_hud: bool,
         monitor: &dyn Monitor,
@@ -95,12 +96,12 @@ impl Scene {
 
     /// La couverture : toute dernière image, fin de l'outro, tracé complet dézoomé, sans la carte
     /// d'infos (place libre pour un titre).
-    pub fn cover(&self, renderer: &Renderer, monitor: &dyn Monitor) -> Result<Image, String> {
+    pub fn cover(&self, renderer: &dyn Frames, monitor: &dyn Monitor) -> Result<Image, String> {
         self.still(renderer, renderer.frame_count().saturating_sub(1), false, monitor)
     }
 
     /// Images de la vidéo entière, ou de ses `seconds` premières secondes.
-    pub fn frames_in(&self, renderer: &Renderer, seconds: Option<f64>) -> u32 {
+    pub fn frames_in(&self, renderer: &dyn Frames, seconds: Option<f64>) -> u32 {
         let all = renderer.frame_count();
         seconds.map_or(all, |seconds| ((seconds * f64::from(self.run.video.fps)).round() as u32).min(all))
     }
@@ -108,7 +109,7 @@ impl Scene {
     /// La vidéo (ou ses `seconds` premières secondes) dans `out`, tuiles téléchargées avant.
     pub fn encode_video(
         &self,
-        renderer: &Renderer,
+        renderer: &dyn Frames,
         seconds: Option<f64>,
         threads: usize,
         out: &str,

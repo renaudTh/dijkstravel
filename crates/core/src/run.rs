@@ -360,7 +360,12 @@ mod tests {
     fn every_run_in_the_repository_is_valid() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../runs");
         for entry in std::fs::read_dir(dir).unwrap() {
-            let file = entry.unwrap().path().join("run.json");
+            let folder = entry.unwrap().path();
+            // Un montage n'a pas de run.json : `montage.rs` le vérifie.
+            if folder.join("montage.json").exists() {
+                continue;
+            }
+            let file = folder.join("run.json");
             let raw: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
             let run = Run::parse(&raw).unwrap_or_else(|issues| panic!("{} : {issues:?}", file.display()));
             assert_eq!(Some(run.name.as_str()), file.parent().unwrap().file_name().unwrap().to_str());

@@ -13,6 +13,7 @@ pub mod hud;
 pub mod infra;
 pub mod mercator;
 pub mod model;
+pub mod montage;
 pub mod monitor;
 pub mod preview;
 pub mod render;

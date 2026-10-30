@@ -10,7 +10,7 @@ use skia_safe::{Canvas, EncodedImageFormat, Rect, Surface, surfaces};
 use crate::atlas::Atlas;
 use crate::frame::{Animation, Moment};
 use crate::hud::{Hud, HudFrame};
-use crate::model::{Input, Tour};
+use crate::model::{Input, Tour, Video};
 use crate::route::Route;
 use crate::sprites::Fonts;
 use crate::stops::{Stops, StopsFrame};
@@ -19,6 +19,29 @@ use crate::stops::{Stops, StopsFrame};
 const POP_SECONDS: f64 = 0.6;
 /// Part de l'outro au bout de laquelle les noms des lieux ont disparu.
 const LABEL_FADE_PROGRESS: f64 = 0.5;
+
+/// Ce que la vidéo lit d'un rendu : un run seul (`Renderer`) ou plusieurs à la suite (`Montage`).
+pub trait Frames: Sync {
+    fn video(&self) -> &Video;
+    fn frame_count(&self) -> u32;
+    /// Toutes les tuiles que liront les images `frames`, `<source>/<z>/<x>/<y>`.
+    fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String>;
+    /// Dessine l'image `frame` sur `canvas`, qu'elle recouvre entièrement.
+    fn draw(&self, canvas: &Canvas, frame: u32, with_hud: bool);
+
+    /// Surface à la taille de la vidéo, réutilisable d'une image à l'autre.
+    fn surface(&self) -> Surface {
+        let video = self.video();
+        surfaces::raster_n32_premul((video.width as i32, video.height as i32)).expect("surface de l'image")
+    }
+
+    /// `with_hud` : sans carte d'infos pour la couverture, sur laquelle l'auteur pose son propre titre.
+    fn render(&self, frame: u32, with_hud: bool) -> Image {
+        let mut surface = self.surface();
+        self.draw(surface.canvas(), frame, with_hud);
+        surface.image_snapshot()
+    }
+}
 
 pub struct Renderer {
     pub input: Input,
@@ -62,12 +85,32 @@ impl Renderer {
         }
     }
 
-    pub fn frame_count(&self) -> u32 {
+    /// La carte d'infos seule de l'image `frame`, par-dessus ce qui est déjà dessiné.
+    pub fn draw_hud(&self, canvas: &Canvas, frame: u32) {
+        let moment = self.animation.moment_at(frame);
+        let hud = self.animation.hud_at(self.animation.meters_of(moment));
+        let hud_frame = HudFrame {
+            meters: hud.meters,
+            total_meters: hud.total_meters,
+            visited: hud.visited,
+            total: hud.total,
+            last_stop: hud.last_stop.as_deref(),
+            intro: matches!(moment, Moment::Intro { .. }),
+        };
+        self.hud.draw(canvas, &hud_frame);
+    }
+}
+
+impl Frames for Renderer {
+    fn video(&self) -> &Video {
+        &self.input.video
+    }
+
+    fn frame_count(&self) -> u32 {
         self.animation.timeline.frame_count()
     }
 
-    /// Toutes les tuiles que liront les images `frames`, `<source>/<z>/<x>/<y>`.
-    pub fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String> {
+    fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String> {
         let (width, height) = (self.input.video.width, self.input.video.height);
         let chunks: BTreeSet<_> = frames
             .flat_map(|frame| {
@@ -78,21 +121,7 @@ impl Renderer {
         tiles.into_iter().collect()
     }
 
-    /// Surface à la taille de la vidéo, réutilisable d'une image à l'autre.
-    pub fn surface(&self) -> Surface {
-        let (width, height) = (self.input.video.width, self.input.video.height);
-        surfaces::raster_n32_premul((width as i32, height as i32)).expect("surface de l'image")
-    }
-
-    /// `with_hud` : sans carte d'infos pour la couverture, sur laquelle l'auteur pose son propre titre.
-    pub fn render(&self, frame: u32, with_hud: bool) -> Image {
-        let mut surface = self.surface();
-        self.draw(surface.canvas(), frame, with_hud);
-        surface.image_snapshot()
-    }
-
-    /// Dessine l'image `frame` sur `canvas`, qu'elle recouvre entièrement.
-    pub fn draw(&self, canvas: &Canvas, frame: u32, with_hud: bool) {
+    fn draw(&self, canvas: &Canvas, frame: u32, with_hud: bool) {
         let (width, height) = (self.input.video.width, self.input.video.height);
         let screen = Rect::from_wh(width as f32, height as f32);
         let moment = self.animation.moment_at(frame);
@@ -113,15 +142,7 @@ impl Renderer {
         let stops_frame = StopsFrame { visited: hud.visited, meters, pop_meters, label_opacity: label_opacity as f32 };
         self.stops.draw(canvas, &view, screen, &stops_frame);
         if with_hud {
-            let hud_frame = HudFrame {
-                meters: hud.meters,
-                total_meters: hud.total_meters,
-                visited: hud.visited,
-                total: hud.total,
-                last_stop: hud.last_stop.as_deref(),
-                intro: matches!(moment, Moment::Intro { .. }),
-            };
-            self.hud.draw(canvas, &hud_frame);
+            self.draw_hud(canvas, frame);
         }
     }
 }

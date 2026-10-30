@@ -3,6 +3,7 @@
 mod console;
 mod editor;
 mod load;
+mod montage;
 mod publication;
 mod render;
 mod solve;

@@ -1,15 +1,18 @@
 //! `dijkstravel render runs/<nom>` → `data/out/<nom>/video.mp4`, par le moteur natif (sans GPU), à
 //! partir du seul `tour.json`. Tout ce que lit le moteur est téléchargé avant, dans `data/cache/`.
-//! `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4`.
+//! `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4`. Un dossier qui
+//! contient `montage.json` se rend comme un montage (`montage.rs`).
 
 use std::path::{Path, PathBuf};
 
+use dijkstravel_core::run::Run;
 use dijkstravel_render::download::Downloader;
 use dijkstravel_render::render::{Image, encode};
 use dijkstravel_render::scene::Scene;
 
 use crate::console::Console;
 use crate::load::{self, Outcome, RunPaths, fail};
+use crate::montage;
 
 pub const CACHE_DIR: &str = "data/cache";
 
@@ -24,6 +27,11 @@ fn scene_lasting(arg: &Path, duration: Option<f64>) -> Outcome<(Scene, RunPaths)
     if let Some(duration) = duration {
         run.video.duration_sec = duration;
     }
+    Ok((scene_of(run, &paths, arg)?, paths))
+}
+
+/// La scène d'un run déjà lu, et peut-être retouché (durée, montage…).
+pub fn scene_of(run: Run, paths: &RunPaths, arg: &Path) -> Outcome<Scene> {
     if !paths.tour.exists() {
         return fail(format!(
             "{} absent : calculer la tournée d'abord (`dijkstravel solve {}`).",
@@ -31,13 +39,13 @@ fn scene_lasting(arg: &Path, duration: Option<f64>) -> Outcome<(Scene, RunPaths)
             arg.display()
         ));
     }
-    let tour = load::tour(&paths)?;
-    let places = load::places(&run, &paths)?;
+    let tour = load::tour(paths)?;
+    let places = load::places(&run, paths)?;
     let scene = Scene::new(run, tour, &places, Downloader::new(CACHE_DIR));
     for (id, url) in &scene.missing_images {
         eprintln!("Image introuvable pour {id} : {url}");
     }
-    Ok((scene, paths))
+    Ok(scene)
 }
 
 /// `video.mp4`, ou la variante `video-<n>s.mp4` d'une durée de trajet forcée.
@@ -66,6 +74,12 @@ pub fn main(
     if !positive(seconds) || !positive(duration) || threads == Some(0) {
         return fail("--seconds et --duration attendent un nombre > 0, --threads un entier > 0");
     }
+    if montage::is_montage(arg) {
+        if duration.is_some() {
+            return fail("--duration ne s'applique pas à un montage : régler durationSec de chaque segment");
+        }
+        return montage::render(arg, seconds, threads, frame);
+    }
     let (scene, paths) = scene_lasting(arg, duration)?;
     let renderer = scene.renderer(load::theme(&scene.run)?, None)?;
     std::fs::create_dir_all(&paths.out)?;
@@ -76,9 +90,13 @@ pub fn main(
         println!("{}", out.display());
         return Ok(());
     }
-    let threads = threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
+    let threads = threads_or_all(threads);
     let video = video_file(&paths, duration);
     scene.encode_video(&renderer, seconds, threads, &video.display().to_string(), &console)?;
     println!("{}", video.display());
     Ok(())
+}
+
+pub fn threads_or_all(threads: Option<usize>) -> usize {
+    threads.unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get))
 }
