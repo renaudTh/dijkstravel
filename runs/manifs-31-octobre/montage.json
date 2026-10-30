@@ -1,0 +1,37 @@
+{
+  "name": "manifs-31-octobre",
+  "title": "Manifestations du samedi 31 octobre",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "transitionSec": 6
+  },
+  "segments": [
+    {
+      "run": "manifs-paris",
+      "title": "Paris · tracé de la préfecture",
+      "durationSec": 6,
+      "city": "Paris",
+      "introSec": 1.5
+    },
+    {
+      "run": "manifs-lyon",
+      "title": "Lyon · 14 h · déclaré",
+      "durationSec": 6,
+      "city": "Lyon"
+    },
+    {
+      "run": "manifs-nice",
+      "title": "Nice · 14 h · déclaré",
+      "durationSec": 6,
+      "city": "Nice"
+    },
+    {
+      "run": "manifs-montpellier",
+      "title": "Montpellier · 14 h · déclaré",
+      "durationSec": 5,
+      "city": "Montpellier",
+      "outroSec": 2
+    }
+  ]
+}

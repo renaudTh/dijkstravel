@@ -1,0 +1,29 @@
+{
+  "name": "manifs-lyon",
+  "title": "Lyon · 14 h · déclaré",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (déclaré, validé par la préfecture)",
+    "url": "https://france3-regions.franceinfo.fr/auvergne-rhone-alpes/rhone/lyon/manifestation-du-31-octobre-a-lyon-le-parcours-valide-par-les-autorites-ce-qu-il-faut-savoir-3441045.html",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 4.8302890000000005,
+    "south": 45.729408,
+    "east": 4.869591,
+    "north": 45.766244
+  },
+  "start": {
+    "place": "manifs-lyon-0"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "manifs-paris",
+  "title": "Paris · tracé de la préfecture",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (proposé par la préfecture, refusé par l'intersyndicale)",
+    "url": "https://www.sortiraparis.com/en/news/in-paris/articles/356351-october-31-demonstration-in-paris-what-route-will-the-unions-take",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 2.3911520000000004,
+    "south": 48.823104,
+    "east": 2.421423,
+    "north": 48.877117
+  },
+  "start": {
+    "place": "manifs-paris-0"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

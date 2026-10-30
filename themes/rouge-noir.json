@@ -1,0 +1,52 @@
+{
+  "route": {
+    "color": "#e10600",
+    "coreColor": "#111111",
+    "width": 16,
+    "coreRatio": 0.4,
+    "coreBlurRatio": 0.5,
+    "stripes": true,
+    "stripeColor": "#e10600",
+    "headRadius": 13
+  },
+  "stops": {
+    "unvisitedColor": "#8a8a8a",
+    "unvisitedRadius": 4,
+    "visitedRatio": 0.85,
+    "popRadius": 18,
+    "icon": "✊",
+    "iconSize": 46,
+    "showLabels": true,
+    "labelSize": 26
+  },
+  "basemap": {
+    "imagery": "ign",
+    "brightness": 0,
+    "contrast": 0.15,
+    "saturation": 0,
+    "hillshade": 0,
+    "borders": false,
+    "borderColor": "#ffffff",
+    "tintColor": "#0a0a0a",
+    "tintOpacity": 0.15,
+    "backgroundColor": "#0a0a0a",
+    "seaImagery": "sentinel"
+  },
+  "hud": {
+    "font": "Poppins",
+    "size": 44,
+    "background": "#0a0a0a",
+    "textColor": "#ffffff",
+    "titleColor": "#ff2a1f",
+    "distanceColor": "#ff2a1f",
+    "pillFrom": "#e10600",
+    "pillTo": "#8b0000",
+    "pillTextColor": "#ffffff",
+    "showTitle": true,
+    "showCount": false,
+    "showLastStop": true
+  },
+  "camera": {
+    "stopSlowdown": 0.6
+  }
+}

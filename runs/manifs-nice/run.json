@@ -1,0 +1,29 @@
+{
+  "name": "manifs-nice",
+  "title": "Nice · 14 h · déclaré",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (déclaré en préfecture)",
+    "url": "https://france3-regions.franceinfo.fr/provence-alpes-cote-d-azur/alpes-maritimes/nice/nouvelle-manifestation-a-nice-le-31-octobre-declaree-en-prefecture-parcours-horaires-ce-qu-il-faut-savoir-3440562.html",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 7.259095,
+    "south": 43.683133000000005,
+    "east": 7.295614,
+    "north": 43.712731
+  },
+  "start": {
+    "place": "manifs-nice-0"
+  },
+  "mode": "loop",
+  "profile": "car",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

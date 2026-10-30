@@ -1,0 +1,29 @@
+{
+  "name": "manifs-montpellier",
+  "title": "Montpellier · 14 h · déclaré",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (déclaré, non interdit)",
+    "url": "https://www.ici.fr/occitanie/herault-34/montpellier/mobilisation-du-31-octobre-a-quoi-faut-il-s-attendre-dans-l-herault-1100378",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 3.827925,
+    "south": 43.579594,
+    "east": 3.872152,
+    "north": 43.640864
+  },
+  "start": {
+    "place": "manifs-montpellier-0"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 5,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}
