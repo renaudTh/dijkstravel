@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-03",
+  "title": "Étape 3 · Granollers – Les Angles",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 3 du Tour de France 2026 (6 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 1.8723055,
+    "south": 41.576337,
+    "east": 2.3077845000000003,
+    "north": 42.635263
+  },
+  "start": {
+    "place": "tdf-2026-03-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

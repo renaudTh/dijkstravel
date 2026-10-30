@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-08",
+  "title": "Étape 8 · Périgueux – Bergerac",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 8 du Tour de France 2026 (11 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 0.44712149999999995,
+    "south": 44.7826015,
+    "east": 1.2716485,
+    "north": 45.1820885
+  },
+  "start": {
+    "place": "tdf-2026-08-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

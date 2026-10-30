@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-04",
+  "title": "Étape 4 · Carcassonne – Foix",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 4 du Tour de France 2026 (7 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 1.55477,
+    "south": 42.8055625,
+    "east": 2.69569,
+    "north": 43.2184475
+  },
+  "start": {
+    "place": "tdf-2026-04-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

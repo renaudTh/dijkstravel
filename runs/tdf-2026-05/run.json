@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-05",
+  "title": "Étape 5 · Lannemezan – Pau",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 5 du Tour de France 2026 (8 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": -0.41729249999999996,
+    "south": 42.851029000000004,
+    "east": 0.4220625,
+    "north": 43.318991
+  },
+  "start": {
+    "place": "tdf-2026-05-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

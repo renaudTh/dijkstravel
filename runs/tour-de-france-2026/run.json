@@ -1,0 +1,29 @@
+{
+  "name": "tour-de-france-2026",
+  "title": "Tour de France 2026",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracés officiels des 21 étapes du Tour de France 2026 (4-26 juillet), GPX publiés par CyclingStage d'après ASO, reliés par les transferts en ligne droite",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": -0.7897400000000001,
+    "south": 40.924119999999995,
+    "east": 7.50361,
+    "north": 49.0897
+  },
+  "start": {
+    "place": "tdf-2026-01-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 114,
+    "introSec": 2,
+    "outroSec": 4
+  }
+}

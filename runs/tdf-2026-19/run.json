@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-19",
+  "title": "Étape 19 · Gap – Alpe d'Huez",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 19 du Tour de France 2026 (24 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 5.814934500000001,
+    "south": 44.553971,
+    "east": 6.0997354999999995,
+    "north": 45.119789000000004
+  },
+  "start": {
+    "place": "tdf-2026-19-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

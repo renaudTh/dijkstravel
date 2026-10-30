@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-15",
+  "title": "Étape 15 · Champagnole – Plateau de Solaison",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 15 du Tour de France 2026 (19 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 5.783557,
+    "south": 45.995642,
+    "east": 6.483663,
+    "north": 46.750858
+  },
+  "start": {
+    "place": "tdf-2026-15-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

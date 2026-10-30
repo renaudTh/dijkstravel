@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-12",
+  "title": "Étape 12 · Nevers Magny-Cours – Chalon-sur-Saône",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 12 du Tour de France 2026 (16 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 3.021939,
+    "south": 46.663092,
+    "east": 4.937721000000001,
+    "north": 46.868088
+  },
+  "start": {
+    "place": "tdf-2026-12-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

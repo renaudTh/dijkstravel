@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-02",
+  "title": "Étape 2 · Tarragone – Barcelone",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 2 du Tour de France 2026 (5 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 1.2388715000000001,
+    "south": 41.1098315,
+    "east": 2.2176185,
+    "north": 41.4241785
+  },
+  "start": {
+    "place": "tdf-2026-02-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

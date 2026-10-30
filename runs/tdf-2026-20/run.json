@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-20",
+  "title": "Étape 20 · Le Bourg-d'Oisans – Alpe d'Huez",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 20 du Tour de France 2026 (25 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 5.982145,
+    "south": 45.019937999999996,
+    "east": 6.498375,
+    "north": 45.284862000000004
+  },
+  "start": {
+    "place": "tdf-2026-20-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

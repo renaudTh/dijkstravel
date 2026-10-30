@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-13",
+  "title": "Étape 13 · Dole – Belfort",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 13 du Tour de France 2026 (17 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 5.478099,
+    "south": 47.057886,
+    "east": 6.9296809999999995,
+    "north": 47.917954
+  },
+  "start": {
+    "place": "tdf-2026-13-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

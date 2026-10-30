@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-18",
+  "title": "Étape 18 · Voiron – Orcières-Merlette",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 18 du Tour de France 2026 (23 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 5.447531,
+    "south": 44.604434,
+    "east": 6.368209,
+    "north": 45.349706
+  },
+  "start": {
+    "place": "tdf-2026-18-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

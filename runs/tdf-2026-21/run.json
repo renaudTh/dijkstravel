@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-21",
+  "title": "Étape 21 · Thoiry – Paris",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 21 du Tour de France 2026 (26 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 1.7283054999999998,
+    "south": 48.764162,
+    "east": 2.3738845,
+    "north": 48.895678
+  },
+  "start": {
+    "place": "tdf-2026-21-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

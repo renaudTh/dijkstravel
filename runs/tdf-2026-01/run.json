@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2026-01",
+  "title": "Étape 1 · Barcelone (clm équipes)",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé officiel de l'étape 1 du Tour de France 2026 (4 juillet), GPX publié par CyclingStage d'après ASO",
+    "url": "https://www.cyclingstage.com/tour-de-france-2026-gpx",
+    "date": "2026-10-30",
+    "licence": "© ASO / CyclingStage, usage éditorial"
+  },
+  "bbox": {
+    "west": 2.1420715,
+    "south": 41.3568775,
+    "east": 2.2229985,
+    "north": 41.422712499999996
+  },
+  "start": {
+    "place": "tdf-2026-01-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}
