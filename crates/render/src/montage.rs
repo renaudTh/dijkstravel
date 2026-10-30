@@ -49,8 +49,12 @@ pub struct Montage {
 
 impl Montage {
     /// `parts` : au moins un rendu, tous au même format et au même thème ; `cities` : une par segment.
-    pub fn new(parts: Vec<Renderer>, cities: Vec<City>, transition: u32) -> Montage {
+    pub fn new(mut parts: Vec<Renderer>, cities: Vec<City>, transition: u32) -> Montage {
         assert!(!parts.is_empty(), "un montage sans segment");
+        // Après le vol, chaque tracé part tout de suite (le premier aussi, après son intro).
+        for part in &mut parts {
+            part.animation.skip_departure_slowdown();
+        }
         let halo = Color::from_argb(220, 0, 0, 0);
         let fonts = Fonts::new();
         let cities = cities
