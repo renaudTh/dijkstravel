@@ -69,7 +69,13 @@ impl Renderer {
         };
         let fonts = Fonts::new();
         Renderer {
-            route: Route::new(&tour.path, &tour.ferries, &theme.route, fonts.emoji(&theme.route.head_icon)),
+            route: Route::new(
+                &tour.path,
+                &tour.ferries,
+                &tour.transfers,
+                &theme.route,
+                fonts.emoji(&theme.route.head_icon),
+            ),
             stops: Stops::new(&input, &tour, theme, &fonts),
             hud: Hud::new(
                 &theme.hud,
@@ -178,7 +184,8 @@ impl Frames for Renderer {
         let meters = self.animation.meters_of(moment);
         let hud = self.animation.hud_at(meters);
         self.route.draw(canvas, &view, screen, meters);
-        if let Moment::Travel { .. } = moment {
+        // Ni avant le départ, ni sur la vue d'ensemble finale, ni entre deux étapes.
+        if matches!(moment, Moment::Travel { .. }) && !self.tour.in_transfer(meters) {
             self.route.draw_head(canvas, &view, meters);
         }
         let pop_meters = self.pop_meters();

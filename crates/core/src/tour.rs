@@ -33,6 +33,10 @@ pub struct Tour {
     /// Absent des tournées calculées avant les traversées : aucune.
     #[serde(default)]
     pub ferries: Vec<[f64; 2]>,
+    /// Transferts entre deux étapes (fin d'une étape → départ de la suivante), en mètres `[début, fin]`,
+    /// dans l'ordre : parcourus vite par la caméra, sans tracé, hors de la distance affichée. Absent : aucun.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfers: Vec<[f64; 2]>,
     /// Distance annoncée par OSRM, pour contrôler `path`.
     pub routed_meters: f64,
 }
@@ -48,6 +52,17 @@ impl Tour {
 
     pub fn total_meters(&self) -> f64 {
         self.path.total_meters()
+    }
+
+    /// `meters` tombe à l'intérieur d'un transfert, ses deux bouts exclus.
+    pub fn in_transfer(&self, meters: f64) -> bool {
+        self.transfers.iter().any(|&[from, to]| from < meters && meters < to)
+    }
+
+    /// Distance parcourue hors transferts à `meters` le long de `path`.
+    pub fn raced_meters(&self, meters: f64) -> f64 {
+        let transferred: f64 = self.transfers.iter().map(|&[from, to]| (meters.min(to) - from).max(0.0)).sum();
+        meters - transferred
     }
 }
 
@@ -71,6 +86,15 @@ mod tests {
             }
         }
         assert!(different.is_empty(), "{different:#?}");
+    }
+
+    #[test]
+    fn raced_meters_leave_out_the_transfers() {
+        let text = r#"{"run":"r","mode":"open","start":[0,0],"path":{"points":[[0,0],[0,1]],"meters":[0,100]},"stops":[],"excluded":[],"transfers":[[20,50]],"routedMeters":100}"#;
+        let tour = Tour::parse(text).unwrap();
+        assert_eq!([10.0, 35.0, 100.0].map(|meters| tour.raced_meters(meters)), [10.0, 20.0, 70.0]);
+        assert_eq!([20.0, 35.0, 50.0].map(|meters| tour.in_transfer(meters)), [false, true, false]);
+        assert_eq!(to_js_string(&tour), text.replace("\"transfers\"", "\"ferries\":[],\"transfers\""));
     }
 
     #[test]

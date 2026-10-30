@@ -58,6 +58,8 @@ const WORLD_METERS: f64 = 40_075_016.0;
 const PACE_SAMPLES: usize = 8192;
 /// Demi-largeur de la zone ralentie autour d'un lieu, en part de l'écart moyen entre deux lieux.
 const SLOW_ZONE: f64 = 0.25;
+/// Un transfert entre deux étapes dure au plus le temps de parcourir cette part d'écran en course.
+const TRANSFER_SCREENS: f64 = 0.5;
 
 fn progress_of(index: u32, count: u32) -> f64 {
     if count <= 1 { 1.0 } else { (f64::from(index) / f64::from(count - 1)).min(1.0) }
@@ -74,7 +76,6 @@ pub struct Animation {
     pub tour: Arc<Tour>,
     pub timeline: Timeline,
     follow_fraction: f64,
-    slowdown: f64,
     total: f64,
     pace: Option<Pace>,
     overview: Camera,
@@ -83,9 +84,11 @@ pub struct Animation {
 impl Animation {
     pub fn new(tour: Arc<Tour>, video: &Video, follow_fraction: f64, slowdown: f64) -> Self {
         let total = tour.path.total_meters();
-        let pace = (slowdown != 0.0 && total != 0.0).then(|| pace_of(&tour, total, slowdown));
         let overview = overview(&tour);
-        Animation { tour, timeline: Timeline::new(video), follow_fraction, slowdown, total, pace, overview }
+        let transfer_meters = TRANSFER_SCREENS * visible_meters(overview, travel_zoom(overview, follow_fraction));
+        let paced = slowdown != 0.0 || !tour.transfers.is_empty();
+        let pace = (paced && total != 0.0).then(|| pace_of(&tour, total, slowdown, transfer_meters));
+        Animation { tour, timeline: Timeline::new(video), follow_fraction, total, pace, overview }
     }
 
     pub fn total_meters(&self) -> f64 {
@@ -117,7 +120,6 @@ impl Animation {
         let Some(Pace { meters, time }) = self.pace.as_ref().filter(|_| progress < 1.0) else {
             return self.total * progress;
         };
-        debug_assert!(self.slowdown != 0.0);
         let target = progress * time.last().copied().unwrap_or(0.0);
         let (mut low, mut high) = (0, time.len() - 1);
         while high - low > 1 {
@@ -138,8 +140,8 @@ impl Animation {
         let stops = &self.tour.stops;
         let visited = stops.iter().filter(|stop| stop.meters <= clamped).count();
         Hud {
-            meters: clamped,
-            total_meters: self.total,
+            meters: self.tour.raced_meters(clamped),
+            total_meters: self.tour.raced_meters(self.total),
             visited,
             total: stops.len(),
             last_stop: visited.checked_sub(1).map(|i| stops[i].name.clone()),
@@ -156,15 +158,13 @@ impl Animation {
 
     /// Zoom de tout le parcours : il ne dépend pas de la position.
     pub fn travel_zoom(&self) -> f64 {
-        (self.overview.zoom + (1.0 / self.follow_fraction).log2()).clamp(4.0, 16.0)
+        travel_zoom(self.overview, self.follow_fraction)
     }
 
     /// Nord en haut, à plat ; le centre suit une moyenne glissante du tracé, pas la tête elle-même.
     fn travel_camera(&self, meters: f64) -> Camera {
         let zoom = self.travel_zoom();
-        let visible_meters =
-            (WORLD_METERS * self.overview.center[1].to_radians().cos() * SCREEN_PIXELS) / (512.0 * 2f64.powf(zoom));
-        let window = visible_meters * 0.5;
+        let window = visible_meters(self.overview, zoom) * 0.5;
         let mut sum = [0.0, 0.0];
         for i in 0..SMOOTHING_SAMPLES {
             let offset = (2 * i) as f64 / (SMOOTHING_SAMPLES - 1) as f64 - 1.0;
@@ -176,7 +176,17 @@ impl Animation {
     }
 }
 
-fn pace_of(tour: &Tour, total: f64, slowdown: f64) -> Pace {
+fn travel_zoom(overview: Camera, follow_fraction: f64) -> f64 {
+    (overview.zoom + (1.0 / follow_fraction).log2()).clamp(4.0, 16.0)
+}
+
+/// Mètres au sol sur le petit côté de l'écran, au zoom `zoom`.
+fn visible_meters(overview: Camera, zoom: f64) -> f64 {
+    (WORLD_METERS * overview.center[1].to_radians().cos() * SCREEN_PIXELS) / (512.0 * 2f64.powf(zoom))
+}
+
+/// `transfer_meters` : un transfert dure au plus le temps de parcourir cette distance en course.
+fn pace_of(tour: &Tour, total: f64, slowdown: f64, transfer_meters: f64) -> Pace {
     let radius = (SLOW_ZONE * total) / (tour.stops.len().max(1) as f64);
     let meters: Vec<f64> = (0..=PACE_SAMPLES).map(|i| (total * i as f64) / PACE_SAMPLES as f64).collect();
     // Le plus fort ralentissement, pas leur somme : un groupe de lieux proches ne s'éternise pas.
@@ -184,7 +194,7 @@ fn pace_of(tour: &Tour, total: f64, slowdown: f64) -> Pace {
         .iter()
         .map(|&at| {
             let strongest = tour.stops.iter().map(|stop| bump((at - stop.meters).abs() / radius)).fold(0.0, f64::max);
-            1.0 + slowdown * strongest
+            (1.0 + slowdown * strongest) * transfer_slowness(at, &tour.transfers, transfer_meters)
         })
         .collect();
     let mut time = vec![0.0];
@@ -193,6 +203,20 @@ fn pace_of(tour: &Tour, total: f64, slowdown: f64) -> Pace {
         time.push(time[i - 1] + step);
     }
     Pace { meters, time }
+}
+
+/// Lenteur relative dans un transfert : la caméra accélère puis freine en cloche, jamais plus lente
+/// qu'en course. Pour une pointe `s` fois plus rapide, le transfert prend `longueur / √s` : `s` est
+/// choisi pour qu'il ne dépasse pas `transfer_meters`.
+fn transfer_slowness(at: f64, transfers: &[[f64; 2]], transfer_meters: f64) -> f64 {
+    let Some(&[from, to]) = transfers.iter().find(|&&[from, to]| from <= at && at <= to) else { return 1.0 };
+    let length = to - from;
+    if length <= transfer_meters {
+        return 1.0;
+    }
+    let peak = (length / transfer_meters).powi(2);
+    let wave = (std::f64::consts::PI * (at - from) / length).sin();
+    1.0 / (1.0 + (peak - 1.0) * wave * wave)
 }
 
 /// 1 sur le lieu, 0 à partir d'une demi-zone, en cloche : la caméra freine et repart sans à-coup.
@@ -240,4 +264,23 @@ fn mercator_degrees(lat: f64) -> f64 {
 
 fn inverse_mercator_degrees(y: f64) -> f64 {
     (2.0 * y.to_radians().exp().atan() - std::f64::consts::FRAC_PI_2).to_degrees()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Temps d'un transfert, en mètres de course : l'intégrale de sa lenteur.
+    fn transfer_time(length: f64, transfer_meters: f64) -> f64 {
+        let steps = 100_000;
+        let step = length / steps as f64;
+        (0..steps).map(|i| transfer_slowness((i as f64 + 0.5) * step, &[[0.0, length]], transfer_meters) * step).sum()
+    }
+
+    #[test]
+    fn a_long_transfer_lasts_as_long_as_the_cap_and_a_short_one_keeps_the_race_pace() {
+        assert!((transfer_time(550_000.0, 40_000.0) - 40_000.0).abs() < 40.0);
+        assert!((transfer_time(10_000.0, 40_000.0) - 10_000.0).abs() < 1e-6);
+        assert_eq!(transfer_slowness(5.0, &[[10.0, 20.0]], 1.0), 1.0);
+    }
 }

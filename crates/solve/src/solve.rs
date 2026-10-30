@@ -180,6 +180,7 @@ pub fn assemble_tour(
         stops,
         excluded,
         ferries,
+        transfers: Vec::new(),
         routed_meters: route.meters,
     })
 }

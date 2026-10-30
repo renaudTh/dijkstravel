@@ -5,7 +5,7 @@ use skia_safe::canvas::SaveLayerRec;
 use skia_safe::{BlendMode, Canvas, Color, Contains, Image, Paint, PathBuilder, Point, Rect, paint};
 
 use crate::color::parse_color;
-use crate::geo::{LonLat, MeasuredPath, split_crossings};
+use crate::geo::{LonLat, MeasuredPath};
 use crate::mercator::View;
 use crate::model::RouteTheme;
 
@@ -18,6 +18,14 @@ const SMALL_SIZE_RATIO: f64 = 0.25;
 /// Traits superposés pour reproduire le dégradé linéaire de `line-blur`.
 const BLUR_STEPS: usize = 8;
 
+/// Nature d'un morceau du tracé.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Road,
+    Ferry,
+    Transfer,
+}
+
 /// `byZoom` de `page.ts` : facteur appliqué aux tailles selon le zoom de l'image.
 pub fn zoom_ratio(zoom: f64) -> f64 {
     let t = ((zoom - SMALL_SIZE_ZOOM) / (FULL_SIZE_ZOOM - SMALL_SIZE_ZOOM)).clamp(0.0, 1.0);
@@ -27,7 +35,8 @@ pub fn zoom_ratio(zoom: f64) -> f64 {
 pub struct Route {
     /// Tracé allégé pour le dessin seulement ; distances d'origine conservées.
     drawn: MeasuredPath,
-    ferries: Vec<[f64; 2]>,
+    /// Traversées et transferts, triés : `[début, fin]` en mètres et leur nature.
+    crossings: Vec<([f64; 2], Kind)>,
     theme: RouteTheme,
     colors: Colors,
     head_icon: Option<Image>,
@@ -42,10 +51,19 @@ struct Colors {
 }
 
 impl Route {
-    pub fn new(path: &MeasuredPath, ferries: &[[f64; 2]], theme: &RouteTheme, head_icon: Option<Image>) -> Self {
+    pub fn new(
+        path: &MeasuredPath,
+        ferries: &[[f64; 2]],
+        transfers: &[[f64; 2]],
+        theme: &RouteTheme,
+        head_icon: Option<Image>,
+    ) -> Self {
+        let mut crossings: Vec<([f64; 2], Kind)> = ferries.iter().map(|&range| (range, Kind::Ferry)).collect();
+        crossings.extend(transfers.iter().map(|&range| (range, Kind::Transfer)));
+        crossings.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
         Route {
             drawn: path.decimate(path.total_meters() / MAX_DRAWN_POINTS),
-            ferries: ferries.to_vec(),
+            crossings,
             colors: Colors {
                 route: parse_color(&theme.color),
                 core: parse_color(&theme.core_color),
@@ -64,9 +82,12 @@ impl Route {
         }
         let ratio = zoom_ratio(view.camera_zoom());
         let width = self.theme.width * ratio;
-        let pieces: Vec<(Vec<Point>, bool)> = split_crossings(&self.drawn, &self.ferries, meters)
+        // Les transferts entre étapes ne se dessinent pas : seule la caméra les parcourt.
+        let pieces: Vec<(Vec<Point>, bool)> = self
+            .pieces(meters)
             .into_iter()
-            .map(|piece| (screen_line(&piece.points, view), piece.ferry))
+            .filter(|(_, kind)| *kind != Kind::Transfer)
+            .map(|(points, kind)| (screen_line(&points, view), kind == Kind::Ferry))
             .collect();
         // Marge : une extrémité arrondie hors de l'écran reste dessinée entière.
         let visible = screen.with_outset((width as f32 + 4.0, width as f32 + 4.0));
@@ -102,6 +123,20 @@ impl Route {
                 );
             }
         }
+    }
+
+    /// Tracé parcouru jusqu'à `meters`, découpé en morceaux de route, de traversée et de transfert.
+    fn pieces(&self, meters: f64) -> Vec<(Vec<LonLat>, Kind)> {
+        let mut pieces = Vec::new();
+        let mut cursor = 0.0;
+        let end = ([f64::INFINITY, f64::INFINITY], Kind::Road);
+        for &([from, to], kind) in self.crossings.iter().chain(std::iter::once(&end)) {
+            pieces.push((self.drawn.path_between(cursor, from.min(meters)), Kind::Road));
+            pieces.push((self.drawn.path_between(from, to.min(meters)), kind));
+            cursor = to;
+        }
+        pieces.retain(|(points, _)| points.len() >= 2);
+        pieces
     }
 
     /// Tête : seulement pendant le parcours (ni avant le départ, ni sur la vue d'ensemble finale).
