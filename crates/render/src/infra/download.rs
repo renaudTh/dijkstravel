@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use dijkstravel_core::places::Place;
@@ -19,8 +19,16 @@ const ATTEMPTS: u32 = 6;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 /// Requêtes simultanées vers les fournisseurs : EOX coupe des connexions au-delà de quelques dizaines.
 const CONCURRENCY: usize = 8;
+/// Pause avant de retenter les tuiles restées injoignables : le temps qu'un fournisseur nous relâche.
+const SECOND_PASS_DELAY: Duration = Duration::from_secs(20);
 /// Graisses de la carte d'infos : titre (700), texte (800), distance (900).
 const HUD_WEIGHTS: [u16; 3] = [700, 800, 900];
+/// Échec d'une requête : sa raison, et si un nouvel essai vaut la peine.
+struct Failure {
+    retry: bool,
+    reason: String,
+}
+
 const IMAGE_EXTENSIONS: [&str; 5] = ["svg", "png", "jpg", "jpeg", "webp"];
 
 struct Imagery {
@@ -109,33 +117,36 @@ impl Downloader {
         self.cache_dir.join("tiles")
     }
 
-    /// Corps de la réponse si elle est bonne ; `Err(true)` si l'erreur vaut un nouvel essai (connexion
-    /// coupée, trop de requêtes, serveur en erreur), `Err(false)` sinon (404 : hors couverture).
-    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>, bool> {
+    /// Corps de la réponse si elle est bonne ; sinon pourquoi, et si un nouvel essai vaut la peine
+    /// (connexion coupée, trop de requêtes, serveur en erreur) ou non (4xx : hors couverture).
+    fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>, Failure> {
         let mut request = self.agent.get(url);
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let mut response = request.call().map_err(|_| true)?;
+        let retry = |reason: String| Failure { retry: true, reason };
+        let mut response = request.call().map_err(|e| retry(e.to_string()))?;
         let status = response.status().as_u16();
         if !(200..300).contains(&status) {
-            return Err(status == 429 || status >= 500);
+            return Err(Failure { retry: status == 429 || status >= 500, reason: format!("HTTP {status}") });
         }
-        response.body_mut().with_config().limit(64 << 20).read_to_vec().map_err(|_| true)
+        response.body_mut().with_config().limit(64 << 20).read_to_vec().map_err(|e| retry(e.to_string()))
     }
 
-    fn get_with_retries(&self, url: &str) -> Option<Vec<u8>> {
+    /// `Ok(None)` : la ressource n'existe pas ; `Err` : toujours injoignable après `ATTEMPTS` essais.
+    fn get_with_retries(&self, url: &str) -> Result<Option<Vec<u8>>, String> {
+        let mut reason = String::new();
         for attempt in 0..ATTEMPTS {
             if attempt > 0 {
                 std::thread::sleep(RETRY_DELAY * 2u32.pow(attempt - 1));
             }
             match self.get(url, &[]) {
-                Ok(body) => return Some(body),
-                Err(false) => return None,
-                Err(true) => {}
+                Ok(body) => return Ok(Some(body)),
+                Err(Failure { retry: false, .. }) => return Ok(None),
+                Err(Failure { reason: last, .. }) => reason = last,
             }
         }
-        None
+        Err(reason)
     }
 
     fn template(&self, source: &str) -> Result<String, String> {
@@ -162,25 +173,53 @@ impl Downloader {
     }
 
     /// Tuiles `<source>/<z>/<x>/<y>` absentes du cache, téléchargées ; une tuile introuvable (hors
-    /// couverture) reste absente et se dessine transparente.
+    /// couverture) reste absente et se dessine transparente. Une tuile injoignable est retentée après une
+    /// pause, puis fait échouer le rendu : sinon elle se dessinerait en carré vide, sans un mot.
     pub fn fetch_tiles(&self, tiles: &[String], monitor: &dyn Monitor) -> Result<(), String> {
         let dir = self.tile_dir();
         let missing: Vec<&String> = tiles.iter().filter(|tile| !dir.join(tile).exists()).collect();
         let total = tiles.len() as u64;
-        let next = AtomicUsize::new(0);
         let done = AtomicUsize::new(tiles.len() - missing.len());
+        let progress = || {
+            let done = done.fetch_add(1, Ordering::Relaxed) as u64 + 1;
+            if done < total {
+                monitor.progress(Stage::Tiles, done, total);
+            }
+        };
+        let mut failed = self.fetch_all(&missing, &dir, monitor, &progress)?;
+        if !failed.is_empty() {
+            std::thread::sleep(SECOND_PASS_DELAY);
+            let again: Vec<&String> = failed.iter().map(|(tile, _)| *tile).collect();
+            failed = self.fetch_all(&again, &dir, monitor, &|| {})?;
+        }
+        if let Some((tile, reason)) = failed.first() {
+            return Err(format!("{} tuiles injoignables, dont {tile} ({reason}) : relancer le rendu", failed.len()));
+        }
+        monitor.progress(Stage::Tiles, total, total);
+        Ok(())
+    }
+
+    /// Télécharge `tiles` en parallèle ; rend celles restées injoignables, avec la raison.
+    fn fetch_all<'t>(
+        &self,
+        tiles: &[&'t String],
+        dir: &Path,
+        monitor: &dyn Monitor,
+        progress: &(dyn Fn() + Sync),
+    ) -> Result<Vec<(&'t String, String)>, String> {
+        let next = AtomicUsize::new(0);
+        let failed = Mutex::new(Vec::new());
         let errors: Vec<String> = std::thread::scope(|scope| {
             let workers: Vec<_> = (0..CONCURRENCY)
                 .map(|_| {
                     scope.spawn(|| -> Result<(), String> {
-                        while let Some(tile) = missing.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        while let Some(&tile) = tiles.get(next.fetch_add(1, Ordering::Relaxed)) {
                             if monitor.cancelled() {
                                 return Err(CANCELLED.to_owned());
                             }
-                            self.fetch_tile(tile, &dir)?;
-                            let done = done.fetch_add(1, Ordering::Relaxed) as u64 + 1;
-                            if done < total {
-                                monitor.progress(Stage::Tiles, done, total);
+                            match self.fetch_tile(tile, dir)? {
+                                Ok(()) => progress(),
+                                Err(reason) => failed.lock().expect("tuiles en échec").push((tile, reason)),
                             }
                         }
                         Ok(())
@@ -189,21 +228,22 @@ impl Downloader {
                 .collect();
             workers.into_iter().filter_map(|worker| worker.join().expect("téléchargement").err()).collect()
         });
-        if let Some(error) = errors.into_iter().next() {
-            return Err(error);
+        match errors.into_iter().next() {
+            Some(error) => Err(error),
+            None => Ok(failed.into_inner().expect("tuiles en échec")),
         }
-        monitor.progress(Stage::Tiles, total, total);
-        Ok(())
     }
 
-    fn fetch_tile(&self, tile: &str, dir: &Path) -> Result<(), String> {
+    /// `Ok(Err(raison))` : la tuile est restée injoignable.
+    fn fetch_tile(&self, tile: &str, dir: &Path) -> Result<Result<(), String>, String> {
         let parts: Vec<&str> = tile.split('/').collect();
         let [source, z, x, y] = parts.as_slice() else { return Err(format!("Tuile mal formée : {tile}")) };
         let url = self.template(source)?.replace("{z}", z).replace("{x}", x).replace("{y}", y);
-        if let Some(body) = self.get_with_retries(&url) {
-            write_atomically(&dir.join(tile), &body)?;
+        match self.get_with_retries(&url) {
+            Ok(Some(body)) => write_atomically(&dir.join(tile), &body).map(Ok),
+            Ok(None) => Ok(Ok(())),
+            Err(reason) => Ok(Err(reason)),
         }
-        Ok(())
     }
 
     /// Fichiers TTF de la police de la carte d'infos, une graisse par fichier ; une graisse que Google
