@@ -46,6 +46,11 @@ pub struct RouteTheme {
 pub struct StopsTheme {
     pub unvisited_color: String,
     pub unvisited_radius: f64,
+    /// Couleur propre du premier lieu (départ), vide : comme les autres. Il n'apparaît alors qu'une fois
+    /// atteint, plein et cerclé.
+    pub start_color: String,
+    /// De même pour le dernier lieu (arrivée).
+    pub end_color: String,
     /// Rayon d'un lieu atteint, rapporté à la largeur du trait.
     pub visited_ratio: f64,
     /// Rayon ajouté au moment où le lieu est atteint (« pop »).
@@ -165,6 +170,8 @@ impl Default for Theme {
             stops: StopsTheme {
                 unvisited_color: s("#d9d9d9"),
                 unvisited_radius: 4.0,
+                start_color: s(""),
+                end_color: s(""),
                 visited_ratio: 0.75,
                 pop_radius: 12.0,
                 icon: s(""),
@@ -231,15 +238,14 @@ impl Reader<'_> {
     }
 
     fn color(&mut self, path: &str, fallback: &str) -> String {
-        let valid = |value: &Value| {
-            value
-                .as_str()
-                .filter(|text| {
-                    text.len() == 7 && text.starts_with('#') && text[1..].chars().all(|c| c.is_ascii_hexdigit())
-                })
-                .map(String::from)
-        };
+        let valid = |value: &Value| value.as_str().filter(|text| is_color(text)).map(String::from);
         self.read(path, fallback.to_owned(), valid, "couleur #rrggbb")
+    }
+
+    /// Une couleur, ou vide : pas de couleur propre.
+    fn optional_color(&mut self, path: &str, fallback: &str) -> String {
+        let valid = |value: &Value| value.as_str().filter(|text| text.is_empty() || is_color(text)).map(String::from);
+        self.read(path, fallback.to_owned(), valid, "couleur #rrggbb ou vide")
     }
 
     /// Un emoji ou deux, pas un texte : il est dessiné en image sur la carte.
@@ -262,6 +268,10 @@ impl Reader<'_> {
         let valid = |value: &Value| value.as_str().filter(|text| choices.contains(text)).map(String::from);
         self.read(path, fallback.to_owned(), valid, &choices.join(" | "))
     }
+}
+
+fn is_color(text: &str) -> bool {
+    text.len() == 7 && text.starts_with('#') && text[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 fn range(path: &str) -> (f64, f64) {
@@ -295,6 +305,8 @@ impl Theme {
             stops: StopsTheme {
                 unvisited_color: r.color("stops.unvisitedColor", &d.stops.unvisited_color),
                 unvisited_radius: r.number("stops.unvisitedRadius", d.stops.unvisited_radius),
+                start_color: r.optional_color("stops.startColor", &d.stops.start_color),
+                end_color: r.optional_color("stops.endColor", &d.stops.end_color),
                 visited_ratio: r.number("stops.visitedRatio", d.stops.visited_ratio),
                 pop_radius: r.number("stops.popRadius", d.stops.pop_radius),
                 icon: r.emoji("stops.icon", &d.stops.icon),
@@ -383,6 +395,13 @@ mod tests {
         let paths: Vec<&str> = issues.iter().map(|issue| issue.path.as_str()).collect();
         assert_eq!(paths, ["route.color", "route.width", "basemap.imagery", "hud.showTitle"]);
         assert_eq!(issues[1].expected, "nombre entre 2 et 40");
+    }
+
+    #[test]
+    fn accepts_an_empty_start_or_end_color() {
+        let theme = Theme::parse(&json!({ "stops": { "startColor": "#0055a4", "endColor": "" } })).unwrap();
+        assert_eq!((theme.stops.start_color.as_str(), theme.stops.end_color.as_str()), ("#0055a4", ""));
+        assert!(Theme::parse(&json!({ "stops": { "endColor": "rouge" } })).is_err());
     }
 
     #[test]

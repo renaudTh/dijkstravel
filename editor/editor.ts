@@ -86,6 +86,8 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
     fields: [
       { kind: 'color', path: 'stops.unvisitedColor', label: 'Lieux à venir' },
       { kind: 'range', path: 'stops.unvisitedRadius', label: 'Rayon des lieux à venir', step: 0.5 },
+      { kind: 'text', path: 'stops.startColor', label: 'Couleur du départ (#rrggbb, vide : aucune)' },
+      { kind: 'text', path: 'stops.endColor', label: "Couleur de l'arrivée (#rrggbb, vide : aucune)" },
       { kind: 'range', path: 'stops.visitedRatio', label: 'Rayon des lieux atteints', step: 0.05 },
       { kind: 'range', path: 'stops.popRadius', label: 'Ampleur du « pop »', step: 1 },
       { kind: 'text', path: 'stops.icon', label: 'Emoji sur les lieux atteints (🏟️, 🍺…)' },

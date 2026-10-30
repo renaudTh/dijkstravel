@@ -32,6 +32,9 @@ pub struct Stops {
     route_color: Color,
     core_color: Color,
     unvisited_color: Color,
+    /// Couleur propre de chaque lieu : départ ou arrivée d'une étape, si le thème en donne une.
+    own_colors: Vec<Option<Color>>,
+    halo_color: Color,
     emoji: Option<Image>,
 }
 
@@ -81,6 +84,8 @@ impl Stops {
             route_color: parse_color(&theme.route.color),
             core_color: parse_color(&theme.route.core_color),
             unvisited_color: parse_color(&stops_theme.unvisited_color),
+            own_colors: own_colors(tour, stops_theme),
+            halo_color: halo,
             emoji: fonts.emoji(&stops_theme.icon),
         }
     }
@@ -88,6 +93,10 @@ impl Stops {
     /// Lieu qui porte l'emoji du thème : il remplace son point.
     fn has_emoji(&self, stop: &Stop, visited: bool) -> bool {
         self.emoji.is_some() && visited && !(self.theme.show_image_on_map && stop.image.is_some())
+    }
+
+    fn own_color(&self, index: usize) -> Option<Color> {
+        self.own_colors.get(index).copied().flatten()
     }
 
     pub fn draw(&self, canvas: &Canvas, view: &View, screen: Rect, frame: &StopsFrame) {
@@ -114,8 +123,21 @@ impl Stops {
             |pop: f32| self.width as f32 * self.theme.visited_ratio as f32 + self.theme.pop_radius as f32 * pop;
         let mut paint = Paint::default();
         paint.set_anti_alias(true);
-        for &(_, stop, point, visited, pop) in &shown {
+        let mut halo = Paint::default();
+        halo.set_anti_alias(true).set_color(self.halo_color).set_alpha_f(0.85);
+        for &(index, stop, point, visited, pop) in &shown {
             if self.has_emoji(stop, visited) {
+                continue;
+            }
+            // Départ et arrivée colorés : rien avant d'être atteints, puis pleins et cerclés.
+            if let Some(color) = self.own_color(index) {
+                if !visited {
+                    continue;
+                }
+                let radius = visited_radius(pop) * ratio;
+                canvas.draw_circle(point, radius + 3.0 * ratio, &halo);
+                paint.set_color(color);
+                canvas.draw_circle(point, radius, &paint);
                 continue;
             }
             let (color, radius) = if visited {
@@ -126,8 +148,8 @@ impl Stops {
             paint.set_color(color);
             canvas.draw_circle(point, radius * ratio, &paint);
         }
-        for &(_, stop, point, visited, pop) in &shown {
-            if visited && !self.has_emoji(stop, visited) {
+        for &(index, stop, point, visited, pop) in &shown {
+            if visited && !self.has_emoji(stop, visited) && self.own_color(index).is_none() {
                 let radius = self.core_ratio as f32 * visited_radius(pop) * ratio;
                 blurred_circle(canvas, point, radius, self.core_color, self.core_blur_ratio as f32);
             }
@@ -183,6 +205,29 @@ impl Stops {
             canvas.draw_image(&label.image, (spot.left - label.pad, spot.top - label.pad), Some(&paint));
         }
     }
+}
+
+/// Le premier lieu et ceux qui suivent un transfert partent une étape (`startColor`) ; le dernier et
+/// ceux qui précèdent un transfert la finissent (`endColor`).
+fn own_colors(tour: &crate::model::Tour, theme: &StopsTheme) -> Vec<Option<Color>> {
+    let color = |text: &str| (!text.is_empty()).then(|| parse_color(text));
+    let (start, end) = (color(&theme.start_color), color(&theme.end_color));
+    let near = |meters: f64, at: f64| (meters - at).abs() < 1.0;
+    let last = tour.stops.len().saturating_sub(1);
+    tour.stops
+        .iter()
+        .enumerate()
+        .map(|(index, stop)| {
+            let starts = index == 0 || tour.transfers.iter().any(|&[_, to]| near(stop.meters, to));
+            let ends = index == last || tour.transfers.iter().any(|&[from, _]| near(stop.meters, from));
+            match (starts, ends) {
+                (true, true) => start.or(end),
+                (true, false) => start,
+                (false, true) => end,
+                (false, false) => None,
+            }
+        })
+        .collect()
 }
 
 /// Icônes qui se chevauchent : MapLibre dessine celle du bas de l'écran par-dessus.
