@@ -23,6 +23,9 @@ const FLIGHT_CURVE: f64 = 1.6;
 /// Zooms entre lesquels les noms des villes apparaissent : invisibles à l'échelle d'une agglomération,
 /// entiers en vue d'avion.
 const CITY_LABELS_ZOOM: (f64, f64) = (10.0, 8.5);
+/// Part du vol sur laquelle s'estompent le tracé de l'étape quittée, et les cartes d'infos.
+const TRACE_FADE: f64 = 0.45;
+const HUD_FADE: f64 = 0.25;
 /// Pixels du petit côté de l'écran, pour la largeur de vue du vol (comme le cadrage de `frame`).
 const SCREEN_PIXELS: f64 = 1080.0;
 
@@ -49,8 +52,12 @@ pub struct Montage {
 
 impl Montage {
     /// `parts` : au moins un rendu, tous au même format et au même thème ; `cities` : une par segment.
-    pub fn new(parts: Vec<Renderer>, cities: Vec<City>, transition: u32) -> Montage {
+    pub fn new(mut parts: Vec<Renderer>, cities: Vec<City>, transition: u32) -> Montage {
         assert!(!parts.is_empty(), "un montage sans segment");
+        // Les noms restent jusqu'au vol, qui les estompe avec le tracé.
+        for part in &mut parts {
+            part.fade_labels_at_outro = false;
+        }
         let halo = Color::from_argb(220, 0, 0, 0);
         let fonts = Fonts::new();
         let cities = cities
@@ -106,15 +113,17 @@ impl Montage {
             canvas.draw_circle((x, y), radius, &dot);
             text.set_alpha_f(alpha);
             let Some(label) = (if current { &city.highlighted } else { &city.label }) else { continue };
-            // À droite du point, sinon à gauche s'il chevauche un nom déjà posé.
+            // À droite du point, sinon à gauche s'il sort de l'écran ou chevauche un nom déjà posé.
             let gap = CITY_DOT_RADIUS * 2.0;
             let (top, w, h) = (y - label.height / 2.0, label.width, label.height);
             let right = Rect::from_xywh(x + gap, top, w, h);
-            let spot = if placed.iter().any(|other| other.intersects(right)) {
-                Rect::from_xywh(x - gap - w, top, w, h)
-            } else {
-                right
+            let left = Rect::from_xywh(x - gap - w, top, w, h);
+            let fits = |spot: Rect| {
+                spot.left >= 0.0
+                    && spot.right <= video.width as f32
+                    && !placed.iter().any(|other| other.intersects(spot))
             };
+            let spot = if fits(right) || (!fits(left) && left.left < 0.0) { right } else { left };
             placed.push(spot);
             canvas.draw_image(&label.image, (spot.left - label.pad, spot.top - label.pad), Some(&text));
         }
@@ -158,12 +167,26 @@ impl Frames for Montage {
             Place::Segment { index, local } => self.parts[index].draw(canvas, local, with_hud),
             Place::Jump { from, progress } => {
                 let (shown, camera) = self.jump_camera(from, progress);
-                // Le tracé de la ville quittée reste visible en partant ; la suivante n'en a pas encore.
-                self.parts[shown].draw_view(canvas, camera, shown == from);
+                // Le tracé et les lieux de l'étape quittée s'estompent en partant ; la suivante n'en a pas encore.
+                let leaving = if shown == from { fade_out(progress, TRACE_FADE) } else { 0.0 };
+                self.parts[shown].draw_view(canvas, camera, leaving);
                 let (hidden, full) = CITY_LABELS_ZOOM;
                 let opacity = ((hidden - camera.zoom) / (hidden - full)).clamp(0.0, 1.0) as f32;
                 if opacity > 0.0 {
                     self.draw_cities(canvas, camera, from + 1, opacity);
+                }
+                if with_hud {
+                    // La carte d'infos quittée s'efface au départ, la suivante apparaît à l'arrivée.
+                    let last = self.parts[from].frame_count().saturating_sub(1);
+                    let cards =
+                        [(from, last, fade_out(progress, HUD_FADE)), (from + 1, 0, fade_out(1.0 - progress, HUD_FADE))];
+                    for (index, frame, alpha) in cards {
+                        if alpha > 0.0 {
+                            canvas.save_layer_alpha_f(None, alpha);
+                            self.parts[index].draw_hud(canvas, frame);
+                            canvas.restore();
+                        }
+                    }
                 }
             }
         }
@@ -179,6 +202,12 @@ fn layout(counts: &[u32], transition: u32) -> Vec<u32> {
         next += count + transition;
     }
     starts
+}
+
+/// 1 au début du vol, 0 passé la part `span`, en douceur.
+fn fade_out(progress: f64, span: f64) -> f32 {
+    let t = (progress / span).clamp(0.0, 1.0);
+    (1.0 - t * t * (3.0 - 2.0 * t)) as f32
 }
 
 fn progress_of(index: u32, count: u32) -> f64 {

@@ -47,6 +47,8 @@ pub struct Renderer {
     pub input: Input,
     pub tour: Arc<Tour>,
     pub animation: Animation,
+    /// Les noms des lieux s'effacent pendant le dézoom final ; un montage les garde jusqu'au vol.
+    pub fade_labels_at_outro: bool,
     atlas: Arc<Atlas>,
     route: Route,
     stops: Stops,
@@ -80,6 +82,7 @@ impl Renderer {
             ),
             atlas,
             animation,
+            fade_labels_at_outro: true,
             tour,
             input,
         }
@@ -94,14 +97,33 @@ impl Renderer {
         self.animation.camera_at(self.animation.moment_at(self.frame_count().saturating_sub(1)))
     }
 
-    /// Le fond de carte vu par une caméra libre (plan large d'un montage), avec le tracé complet ou sans.
-    pub fn draw_view(&self, canvas: &Canvas, camera: Camera, with_route: bool) {
+    /// Le fond de carte vu par une caméra libre (plan large d'un montage), avec par-dessus le tracé complet
+    /// et les lieux atteints, à l'opacité `finished` (0 : le fond seul).
+    pub fn draw_view(&self, canvas: &Canvas, camera: Camera, finished: f32) {
         let (width, height) = (self.input.video.width, self.input.video.height);
+        let screen = Rect::from_wh(width as f32, height as f32);
         let view = self.atlas.view(camera, width, height);
         self.atlas.draw(canvas, view, width, height);
-        if with_route {
-            self.route.draw(canvas, &view, Rect::from_wh(width as f32, height as f32), self.animation.total_meters());
+        if finished <= 0.0 {
+            return;
         }
+        let total = self.animation.total_meters();
+        canvas.save_layer_alpha_f(None, finished.min(1.0));
+        self.route.draw(canvas, &view, screen, total);
+        // Les lieux tels qu'à la dernière image du rendu.
+        let stops_frame = StopsFrame {
+            visited: self.tour.stops.len(),
+            meters: total,
+            pop_meters: self.pop_meters(),
+            label_opacity: 1.0,
+        };
+        self.stops.draw(canvas, &view, screen, &stops_frame);
+        canvas.restore();
+    }
+
+    /// Distance sur laquelle un lieu atteint « pope ».
+    fn pop_meters(&self) -> f64 {
+        self.animation.total_meters() / self.input.video.duration_sec * POP_SECONDS
     }
 
     /// Les tuiles que lit `draw_view` pour cette caméra.
@@ -159,9 +181,9 @@ impl Frames for Renderer {
         if let Moment::Travel { .. } = moment {
             self.route.draw_head(canvas, &view, meters);
         }
-        let pop_meters = self.animation.total_meters() / self.input.video.duration_sec * POP_SECONDS;
+        let pop_meters = self.pop_meters();
         let label_opacity = match moment {
-            Moment::Outro { progress } => (1.0 - progress / LABEL_FADE_PROGRESS).max(0.0),
+            Moment::Outro { progress } if self.fade_labels_at_outro => (1.0 - progress / LABEL_FADE_PROGRESS).max(0.0),
             _ => 1.0,
         };
         let stops_frame = StopsFrame { visited: hud.visited, meters, pop_meters, label_opacity: label_opacity as f32 };
