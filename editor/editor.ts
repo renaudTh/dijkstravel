@@ -107,6 +107,7 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'checkbox', path: 'basemap.borders', label: 'Frontières' },
       { kind: 'color', path: 'basemap.borderColor', label: 'Couleur des frontières' },
       { kind: 'color', path: 'basemap.tintColor', label: 'Teinte de la carte' },
+      { kind: 'color', path: 'basemap.backgroundColor', label: 'Fond hors imagerie (mer IGN)' },
       { kind: 'range', path: 'basemap.tintOpacity', label: 'Intensité de la teinte', step: 0.01 },
     ],
   },

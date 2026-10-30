@@ -76,6 +76,8 @@ pub struct BasemapTheme {
     /// Voile de couleur posé sur l'imagerie : une ambiance (nuit, sépia…) sans toucher au tracé.
     pub tint_color: String,
     pub tint_opacity: f64,
+    /// Sous l'imagerie, là où elle n'a pas de tuile (l'IGN au large).
+    pub background_color: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -175,6 +177,7 @@ impl Default for Theme {
                 borders: true,
                 border_color: s("#ffffff"),
                 tint_color: s("#0b1630"),
+                background_color: s("#ffffff"),
                 tint_opacity: 0.0,
             },
             hud: HudTheme {
@@ -303,6 +306,7 @@ impl Theme {
                 borders: r.flag("basemap.borders", d.basemap.borders),
                 border_color: r.color("basemap.borderColor", &d.basemap.border_color),
                 tint_color: r.color("basemap.tintColor", &d.basemap.tint_color),
+                background_color: r.color("basemap.backgroundColor", &d.basemap.background_color),
                 tint_opacity: r.number("basemap.tintOpacity", d.basemap.tint_opacity),
             },
             hud: HudTheme {

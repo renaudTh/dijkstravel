@@ -41,6 +41,7 @@ pub struct Atlas {
     borders: Option<Borders>,
     adjust: ColorFilter,
     tint: Color,
+    background: Color,
     chunks: Lru<ChunkKey, Image>,
 }
 
@@ -71,6 +72,7 @@ impl Atlas {
                 .then(|| Borders::new(dir, &vector.name, vector.maxzoom, parse_color(&basemap.border_color))),
             adjust: raster_adjust(basemap.saturation, basemap.contrast, basemap.brightness),
             tint: parse_color(&basemap.tint_color).with_a((basemap.tint_opacity.clamp(0.0, 1.0) * 255.0).round() as u8),
+            background: parse_color(&basemap.background_color),
             chunks: Lru::new(CHUNKS),
         }
     }
@@ -226,8 +228,8 @@ impl Atlas {
         let side = CHUNK + 2 * APRON;
         let mut surface = surfaces::raster_n32_premul((side, side)).expect("surface du morceau");
         let canvas = surface.canvas();
-        // Hors couverture de l'imagerie (IGN au large) : le blanc de la page sous la carte.
-        canvas.clear(Color::WHITE);
+        // Hors couverture de l'imagerie (IGN au large) : le fond du thème, blanc comme la page par défaut.
+        canvas.clear(self.background);
         let zoom = self.level_zoom(key.level);
         let [x0, y0, ..] = Self::bounds(key);
         let tile_size = world_size(zoom) / f64::from(1u32 << self.tile_zoom(key.level));
