@@ -17,6 +17,8 @@ pub struct Input {
     pub imagery: ImagerySource,
     /// Sous `imagery`, visible là où elle n'a rien (`basemap.seaImagery`).
     pub sea_imagery: Option<ImagerySource>,
+    /// Fond des transferts entre étapes (`basemap.transferImagery`), en fondu depuis `imagery`.
+    pub transfer_imagery: Option<ImagerySource>,
     /// Relief (Terrarium) d'où vient l'ombrage.
     pub terrain: TileSource,
     /// Tuiles vectorielles d'où viennent les frontières.

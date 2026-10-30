@@ -50,6 +50,8 @@ pub struct Renderer {
     /// Les noms des lieux s'effacent pendant le dézoom final ; un montage les garde jusqu'au vol.
     pub fade_labels_at_outro: bool,
     atlas: Arc<Atlas>,
+    /// Le fond des transferts, s'il y en a un et des transferts.
+    transfer_atlas: Option<Atlas>,
     route: Route,
     stops: Stops,
     hud: Hud,
@@ -67,7 +69,20 @@ impl Renderer {
             Some(previous) if previous.atlas.serves(travel_zoom, &input) => previous.atlas.clone(),
             _ => Arc::new(Atlas::new(travel_zoom, &input)),
         };
+        let transfer_atlas = input.transfer_imagery.clone().filter(|_| !tour.transfers.is_empty()).map(|imagery| {
+            let mut transfer = input.clone();
+            transfer.imagery = imagery;
+            transfer.sea_imagery = None;
+            Atlas::new(travel_zoom, &transfer)
+        });
         let fonts = Fonts::new();
+        // Chaque imagerie dessinée est créditée, une fois.
+        let mut credits: Vec<&str> = Vec::new();
+        for imagery in [Some(&input.imagery), input.sea_imagery.as_ref(), input.transfer_imagery.as_ref()] {
+            if let Some(credit) = imagery.map(|imagery| imagery.credit.as_str()).filter(|c| !credits.contains(c)) {
+                credits.push(credit);
+            }
+        }
         Renderer {
             route: Route::new(
                 &tour.path,
@@ -80,13 +95,14 @@ impl Renderer {
             hud: Hud::new(
                 &theme.hud,
                 &input.title,
-                &input.imagery.credit,
+                &credits.join(" · "),
                 &input.hud_fonts,
                 &tour.stops.iter().map(|stop| input.images.get(&stop.id).cloned()).collect::<Vec<_>>(),
                 input.video.width,
                 input.video.height,
             ),
             atlas,
+            transfer_atlas,
             animation,
             fade_labels_at_outro: true,
             tour,
@@ -165,12 +181,23 @@ impl Frames for Renderer {
 
     fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String> {
         let (width, height) = (self.input.video.width, self.input.video.height);
-        let chunks: BTreeSet<_> = frames
-            .flat_map(|frame| {
-                self.atlas.chunks_for(self.animation.camera_at(self.animation.moment_at(frame)), width, height)
-            })
-            .collect();
-        let tiles: BTreeSet<String> = chunks.into_iter().flat_map(|chunk| self.atlas.tiles_of(chunk)).collect();
+        let mut chunks = BTreeSet::new();
+        let mut transfer_chunks = BTreeSet::new();
+        for frame in frames {
+            let moment = self.animation.moment_at(frame);
+            let camera = self.animation.camera_at(moment);
+            chunks.extend(self.atlas.chunks_for(camera, width, height));
+            // Le fond des transferts, seulement là où il se voit.
+            if let Some(transfer) = &self.transfer_atlas
+                && self.animation.transfer_blend(self.animation.meters_of(moment)) > 0.0
+            {
+                transfer_chunks.extend(transfer.chunks_for(camera, width, height));
+            }
+        }
+        let mut tiles: BTreeSet<String> = chunks.into_iter().flat_map(|chunk| self.atlas.tiles_of(chunk)).collect();
+        if let Some(transfer) = &self.transfer_atlas {
+            tiles.extend(transfer_chunks.into_iter().flat_map(|chunk| transfer.tiles_of(chunk)));
+        }
         tiles.into_iter().collect()
     }
 
@@ -178,10 +205,19 @@ impl Frames for Renderer {
         let (width, height) = (self.input.video.width, self.input.video.height);
         let screen = Rect::from_wh(width as f32, height as f32);
         let moment = self.animation.moment_at(frame);
-        let view = self.atlas.view(self.animation.camera_at(moment), width, height);
+        let camera = self.animation.camera_at(moment);
+        let view = self.atlas.view(camera, width, height);
         self.atlas.draw(canvas, view, width, height);
 
         let meters = self.animation.meters_of(moment);
+        if let Some(transfer) = &self.transfer_atlas {
+            let blend = self.animation.transfer_blend(meters);
+            if blend > 0.0 {
+                canvas.save_layer_alpha_f(None, blend as f32);
+                transfer.draw(canvas, transfer.view(camera, width, height), width, height);
+                canvas.restore();
+            }
+        }
         let hud = self.animation.hud_at(meters);
         self.route.draw(canvas, &view, screen, meters);
         // Ni avant le départ, ni sur la vue d'ensemble finale, ni entre deux étapes.

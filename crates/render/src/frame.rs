@@ -60,6 +60,8 @@ const PACE_SAMPLES: usize = 8192;
 const SLOW_ZONE: f64 = 0.25;
 /// Un transfert entre deux étapes dure au plus le temps de parcourir cette part d'écran en course.
 const TRANSFER_SCREENS: f64 = 0.5;
+/// Part de chaque bout d'un transfert sur laquelle se fait le fondu vers son fond, et retour.
+const TRANSFER_FADE: f64 = 0.25;
 
 fn progress_of(index: u32, count: u32) -> f64 {
     if count <= 1 { 1.0 } else { (f64::from(index) / f64::from(count - 1)).min(1.0) }
@@ -79,6 +81,8 @@ pub struct Animation {
     total: f64,
     pace: Option<Pace>,
     overview: Camera,
+    /// Un transfert dure au plus le temps de parcourir cette distance en course.
+    transfer_meters: f64,
 }
 
 impl Animation {
@@ -88,7 +92,12 @@ impl Animation {
         let transfer_meters = TRANSFER_SCREENS * visible_meters(overview, travel_zoom(overview, follow_fraction));
         let paced = slowdown != 0.0 || !tour.transfers.is_empty();
         let pace = (paced && total != 0.0).then(|| pace_of(&tour, total, slowdown, transfer_meters));
-        Animation { tour, timeline: Timeline::new(video), follow_fraction, total, pace, overview }
+        Animation { tour, timeline: Timeline::new(video), follow_fraction, total, pace, overview, transfer_meters }
+    }
+
+    /// Part du fond des transferts à `meters` (`transfer_blend`).
+    pub fn transfer_blend(&self, meters: f64) -> f64 {
+        transfer_blend(meters, &self.tour.transfers, self.transfer_meters)
     }
 
     pub fn total_meters(&self) -> f64 {
@@ -205,6 +214,15 @@ fn pace_of(tour: &Tour, total: f64, slowdown: f64, transfer_meters: f64) -> Pace
     Pace { meters, time }
 }
 
+/// Part du fond des transferts : elle monte au début du transfert et retombe à sa fin. Un transfert
+/// plus court que `transfer_meters` ne l'atteint pas en entier : pas d'éclair de fond.
+fn transfer_blend(meters: f64, transfers: &[[f64; 2]], transfer_meters: f64) -> f64 {
+    let Some(&[from, to]) = transfers.iter().find(|&&[from, to]| from < meters && meters < to) else { return 0.0 };
+    let length = to - from;
+    let edge = (meters - from).min(to - meters) / length;
+    (length / transfer_meters).min(1.0) * smoothstep((edge / TRANSFER_FADE).min(1.0))
+}
+
 /// Lenteur relative dans un transfert : la caméra accélère puis freine en cloche, jamais plus lente
 /// qu'en course. Pour une pointe `s` fois plus rapide, le transfert prend `longueur / √s` : `s` est
 /// choisi pour qu'il ne dépasse pas `transfer_meters`.
@@ -282,5 +300,14 @@ mod tests {
         assert!((transfer_time(550_000.0, 40_000.0) - 40_000.0).abs() < 40.0);
         assert!((transfer_time(10_000.0, 40_000.0) - 10_000.0).abs() < 1e-6);
         assert_eq!(transfer_slowness(5.0, &[[10.0, 20.0]], 1.0), 1.0);
+    }
+
+    #[test]
+    fn the_transfer_background_fades_in_and_out_and_stays_faint_on_short_transfers() {
+        let long = [[0.0, 1000.0]];
+        let blend = |meters: f64| transfer_blend(meters, &long, 100.0);
+        assert_eq!([0.0, 500.0, 1000.0, 1200.0].map(blend), [0.0, 1.0, 0.0, 0.0]);
+        assert!(blend(50.0) > 0.0 && blend(50.0) < 0.5 && (blend(50.0) - blend(950.0)).abs() < 1e-9);
+        assert!((transfer_blend(5.0, &[[0.0, 10.0]], 100.0) - 0.1).abs() < 1e-9);
     }
 }
