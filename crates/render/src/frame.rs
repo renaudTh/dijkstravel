@@ -83,21 +83,13 @@ pub struct Animation {
 impl Animation {
     pub fn new(tour: Arc<Tour>, video: &Video, follow_fraction: f64, slowdown: f64) -> Self {
         let total = tour.path.total_meters();
-        let pace = (slowdown != 0.0 && total != 0.0).then(|| pace_of(&tour, total, slowdown, false));
+        let pace = (slowdown != 0.0 && total != 0.0).then(|| pace_of(&tour, total, slowdown));
         let overview = overview(&tour);
         Animation { tour, timeline: Timeline::new(video), follow_fraction, slowdown, total, pace, overview }
     }
 
     pub fn total_meters(&self) -> f64 {
         self.total
-    }
-
-    /// Le tracé démarre à pleine vitesse au lieu de ralentir sur le lieu de départ : dans un montage, la
-    /// caméra vient d'y atterrir, s'y attarder encore ferait traîner chaque ville.
-    pub fn skip_departure_slowdown(&mut self) {
-        if self.pace.is_some() {
-            self.pace = Some(pace_of(&self.tour, self.total, self.slowdown, true));
-        }
     }
 
     pub fn moment_at(&self, frame: u32) -> Moment {
@@ -184,17 +176,14 @@ impl Animation {
     }
 }
 
-/// `skip_departure` : sans ralentir sur les lieux du point de départ (à 0 m).
-fn pace_of(tour: &Tour, total: f64, slowdown: f64, skip_departure: bool) -> Pace {
+fn pace_of(tour: &Tour, total: f64, slowdown: f64) -> Pace {
     let radius = (SLOW_ZONE * total) / (tour.stops.len().max(1) as f64);
-    let slowing: Vec<f64> =
-        tour.stops.iter().map(|stop| stop.meters).filter(|&meters| !skip_departure || meters > 0.0).collect();
     let meters: Vec<f64> = (0..=PACE_SAMPLES).map(|i| (total * i as f64) / PACE_SAMPLES as f64).collect();
     // Le plus fort ralentissement, pas leur somme : un groupe de lieux proches ne s'éternise pas.
     let slowness: Vec<f64> = meters
         .iter()
         .map(|&at| {
-            let strongest = slowing.iter().map(|&meters| bump((at - meters).abs() / radius)).fold(0.0, f64::max);
+            let strongest = tour.stops.iter().map(|stop| bump((at - stop.meters).abs() / radius)).fold(0.0, f64::max);
             1.0 + slowdown * strongest
         })
         .collect();
@@ -251,37 +240,4 @@ fn mercator_degrees(lat: f64) -> f64 {
 
 fn inverse_mercator_degrees(y: f64) -> f64 {
     (2.0 * y.to_radians().exp().atan() - std::f64::consts::FRAC_PI_2).to_degrees()
-}
-
-#[cfg(test)]
-mod tests {
-    use dijkstravel_core::geo::MeasuredPath;
-    use dijkstravel_core::run::TourMode;
-    use dijkstravel_core::tour::Stop;
-
-    use super::*;
-
-    #[test]
-    fn a_montage_segment_leaves_its_departure_at_full_speed() {
-        let path = MeasuredPath::measure((0..=100).map(|i| [2.0 + f64::from(i) * 0.001, 48.0]).collect());
-        let total = path.total_meters();
-        let stop = |id: &str, meters: f64| Stop { id: id.into(), name: id.into(), at: path.point_at(meters), meters };
-        let tour = Tour {
-            run: "essai".into(),
-            mode: TourMode::Open,
-            start: path.points[0],
-            stops: vec![stop("a", 0.0), stop("b", total / 2.0), stop("c", total)],
-            path,
-            excluded: Vec::new(),
-            ferries: Vec::new(),
-            routed_meters: total,
-        };
-        let video = Video { width: 1080, height: 1920, duration_sec: 10.0, intro_sec: 0.0, outro_sec: 0.0, fps: 30 };
-        let mut animation = Animation::new(Arc::new(tour), &video, 0.2, 1.5);
-        let early = |animation: &Animation| animation.meters_of(animation.moment_at(15));
-        let slowed = early(&animation);
-        animation.skip_departure_slowdown();
-        assert!(early(&animation) > 1.5 * slowed, "{} m au lieu de {slowed} m", early(&animation));
-        assert_eq!(animation.meters_of(animation.moment_at(299)), animation.total_meters());
-    }
 }
