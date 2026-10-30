@@ -210,7 +210,7 @@ fn parse_provenance(raw: Option<&Value>) -> Option<Provenance> {
     })
 }
 
-pub(crate) fn parse_bbox(raw: &Value) -> Option<BBox> {
+fn parse_bbox(raw: &Value) -> Option<BBox> {
     let side = |key: &str| field(raw, key).and_then(finite);
     let bbox = BBox { west: side("west")?, south: side("south")?, east: side("east")?, north: side("north")? };
     (bbox.west < bbox.east && bbox.south < bbox.north).then_some(bbox)

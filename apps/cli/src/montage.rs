@@ -39,7 +39,7 @@ pub fn render(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: O
     // Le thème du montage, lu une fois : chaque scène porte déjà son nom.
     let theme = load::theme(&scenes[0].run)?;
     let parts = scenes.iter().map(|scene| scene.renderer(theme.clone(), None)).collect::<Result<Vec<_>, _>>()?;
-    // Sur le plan large, chaque ville au début de son tracé.
+    // En vue d'avion, chaque ville au début de son tracé.
     let cities = montage
         .segments
         .iter()
@@ -49,9 +49,8 @@ pub fn render(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: O
             name: segment.city.clone().or_else(|| scene.run.title.clone()).unwrap_or_else(|| segment.run.clone()),
         })
         .collect();
-    let wide = montage.wide.map(|b| vec![[b.west, b.south], [b.east, b.north]]);
     let transition = (montage.transition_sec * f64::from(montage.fps)).round() as u32;
-    let frames = Frames::new(parts, cities, wide, transition);
+    let frames = Frames::new(parts, cities, transition);
     // Les tuiles vont dans le cache commun : la première scène suffit à les télécharger.
     let scene = &scenes[0];
     let console = Console { fps: montage.fps };

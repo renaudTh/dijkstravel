@@ -205,7 +205,7 @@ fn overview(tour: &Tour) -> Camera {
 }
 
 /// La caméra qui cadre tous les `points` (80 % de l'écran), nord en haut.
-pub fn fit(points: impl IntoIterator<Item = LonLat>) -> Camera {
+fn fit(points: impl IntoIterator<Item = LonLat>) -> Camera {
     let (mut west, mut east, mut south, mut north) =
         (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
     for [lon, lat] in points {
@@ -230,7 +230,7 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
 }
 
-pub fn smoothstep(t: f64) -> f64 {
+fn smoothstep(t: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 

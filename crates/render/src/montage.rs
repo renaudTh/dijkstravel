@@ -1,11 +1,11 @@
 //! Plusieurs rendus à la suite, chacun avec sa tournée et sa caméra. Entre deux segments, la caméra
-//! dézoome jusqu'au plan large (toute la France, par exemple), où s'affichent les noms des villes,
-//! puis rezoome sur le début du segment suivant : un saut, sans trajet ni distance entre les deux.
+//! vole de la fin de l'un au début du suivant : elle dézoome en partant déjà vers la ville suivante,
+//! passe en vue d'avion, où s'affichent les noms des villes, puis redescend. Ni trajet ni distance.
 
 use skia_safe::{Canvas, Color, Paint, Rect};
 
 use crate::color::parse_color;
-use crate::frame::{Camera, fit, smoothstep};
+use crate::frame::Camera;
 use crate::geo::LonLat;
 use crate::mercator::{View, project, unproject};
 use crate::model::Video;
@@ -15,8 +15,14 @@ use crate::sprites::{Fonts, Label};
 /// Taille du nom des villes sur le plan large, en pixels.
 const CITY_LABEL_SIZE: f32 = 40.0;
 const CITY_DOT_RADIUS: f32 = 9.0;
-/// Part du saut prise par le dézoom, autant par le rezoom ; le reste est une pause sur le plan large.
-const ZOOM_SHARE: f64 = 0.4;
+/// Courbure du vol (`rho` de van Wijk et Nuij, `curve` du `flyTo` de MapLibre, qui prend 1,42) : plus
+/// elle est forte, plus la caméra monte avant de traverser.
+const FLIGHT_CURVE: f64 = 1.6;
+/// Zooms entre lesquels les noms des villes apparaissent : invisibles à l'échelle d'une agglomération,
+/// entiers en vue d'avion.
+const CITY_LABELS_ZOOM: (f64, f64) = (10.0, 8.5);
+/// Pixels du petit côté de l'écran, pour la largeur de vue du vol (comme le cadrage de `frame`).
+const SCREEN_PIXELS: f64 = 1080.0;
 
 /// Une ville du plan large : là où commence son segment.
 pub struct City {
@@ -34,9 +40,8 @@ pub struct Montage {
     parts: Vec<Renderer>,
     /// Première image de chaque segment dans la vidéo.
     starts: Vec<u32>,
-    /// Images de chaque saut entre deux segments.
+    /// Images de chaque vol entre deux segments.
     transition: u32,
-    wide: Camera,
     cities: Vec<CityMark>,
     /// Point des villes, et celui de la ville où l'on va.
     colors: (Color, Color),
@@ -44,13 +49,8 @@ pub struct Montage {
 
 impl Montage {
     /// `parts` : au moins un rendu, tous au même format et au même thème ; `cities` : une par segment.
-    /// `wide` : les points que cadre le plan large, à défaut ceux de tous les tracés.
-    pub fn new(parts: Vec<Renderer>, cities: Vec<City>, wide: Option<Vec<LonLat>>, transition: u32) -> Montage {
+    pub fn new(parts: Vec<Renderer>, cities: Vec<City>, transition: u32) -> Montage {
         assert!(!parts.is_empty(), "un montage sans segment");
-        let wide = match wide {
-            Some(points) => fit(points),
-            None => fit(parts.iter().flat_map(|part| part.tour.path.points.iter().copied())),
-        };
         let (normal, highlight) = (Color::WHITE, parse_color(&parts[0].input.theme.hud.title_color));
         let halo = Color::from_argb(220, 0, 0, 0);
         let fonts = Fonts::new();
@@ -63,7 +63,7 @@ impl Montage {
             })
             .collect();
         let starts = layout(&parts.iter().map(Frames::frame_count).collect::<Vec<_>>(), transition);
-        Montage { parts, starts, transition, wide, cities, colors: (normal, highlight) }
+        Montage { parts, starts, transition, cities, colors: (normal, highlight) }
     }
 
     /// Où tombe `frame` : dans le segment `index`, ou dans le saut qui le suit.
@@ -78,18 +78,12 @@ impl Montage {
         }
     }
 
-    /// La caméra du saut après le segment `from` : dézoom jusqu'au plan large, pause, puis rezoom sur le
-    /// suivant. Rend aussi le segment dont le fond se dessine et la part du plan large atteinte (de 0 à 1).
-    fn jump_camera(&self, from: usize, progress: f64) -> (usize, Camera, f64) {
-        let zoom_out = (progress / ZOOM_SHARE).min(1.0);
-        let zoom_in = ((1.0 - progress) / ZOOM_SHARE).min(1.0);
-        if progress < 0.5 {
-            let t = smoothstep(zoom_out);
-            (from, zoom_between(self.parts[from].last_camera(), self.wide, t), t)
-        } else {
-            let t = smoothstep(zoom_in);
-            (from + 1, zoom_between(self.parts[from + 1].first_camera(), self.wide, t), t)
-        }
+    /// La caméra du vol après le segment `from`, et le segment dont le fond se dessine : celui qu'on
+    /// quitte jusqu'au milieu du vol, en vue d'avion, puis celui où l'on arrive.
+    fn jump_camera(&self, from: usize, progress: f64) -> (usize, Camera) {
+        let t = ease_in_out(progress);
+        let camera = fly(self.parts[from].last_camera(), self.parts[from + 1].first_camera(), t);
+        (if progress < 0.5 { from } else { from + 1 }, camera)
     }
 
     /// Le point et le nom de chaque ville ; celle de `next` dans la couleur du titre.
@@ -147,7 +141,7 @@ impl Frames for Montage {
             if index + 1 < self.parts.len() {
                 let jump = start + count..start + count + self.transition;
                 for frame in frames.start.max(jump.start)..frames.end.min(jump.end) {
-                    let (shown, camera, _) = self.jump_camera(index, progress_of(frame - jump.start, self.transition));
+                    let (shown, camera) = self.jump_camera(index, progress_of(frame - jump.start, self.transition));
                     tiles.extend(self.parts[shown].tiles_at(camera));
                 }
             }
@@ -159,11 +153,11 @@ impl Frames for Montage {
         match self.locate(frame) {
             Place::Segment { index, local } => self.parts[index].draw(canvas, local, with_hud),
             Place::Jump { from, progress } => {
-                let (shown, camera, wide) = self.jump_camera(from, progress);
+                let (shown, camera) = self.jump_camera(from, progress);
                 // Le tracé de la ville quittée reste visible en partant ; la suivante n'en a pas encore.
                 self.parts[shown].draw_view(canvas, camera, shown == from);
-                // Les noms apparaissent à l'approche du plan large et s'effacent au rezoom.
-                let opacity = ((wide - 0.4) / 0.5).clamp(0.0, 1.0) as f32;
+                let (hidden, full) = CITY_LABELS_ZOOM;
+                let opacity = ((hidden - camera.zoom) / (hidden - full)).clamp(0.0, 1.0) as f32;
                 if opacity > 0.0 {
                     self.draw_cities(canvas, camera, from + 1, opacity);
                 }
@@ -187,18 +181,35 @@ fn progress_of(index: u32, count: u32) -> f64 {
     if count <= 1 { 1.0 } else { f64::from(index) / f64::from(count - 1) }
 }
 
-/// De `near` (t = 0) à `wide` (t = 1). Le centre glisse pour moitié au rythme de l'échelle, qui garde
-/// le point de départ à l'écran pendant que la vue s'élargit, pour moitié au rythme du zoom, qui évite
-/// de tout rattraper d'un coup à la fin.
-fn zoom_between(near: Camera, wide: Camera, t: f64) -> Camera {
-    let zoom = near.zoom + (wide.zoom - near.zoom) * t;
-    let scale = |zoom: f64| (-zoom).exp2();
-    let span = scale(wide.zoom) - scale(near.zoom);
-    let by_scale = if span.abs() < 1e-12 { t } else { ((scale(zoom) - scale(near.zoom)) / span).clamp(0.0, 1.0) };
-    let weight = (by_scale + t) / 2.0;
-    let (a, b) = (project(near.center, 0.0), project(wide.center, 0.0));
-    let center = unproject([a[0] + (b[0] - a[0]) * weight, a[1] + (b[1] - a[1]) * weight], 0.0);
-    Camera { center, zoom }
+fn ease_in_out(t: f64) -> f64 {
+    if t < 0.5 { 4.0 * t * t * t } else { 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0 }
+}
+
+/// Vol de `from` (t = 0) à `to` (t = 1) : zoom et déplacement mêlés sur le chemin le plus court perçu
+/// (van Wijk et Nuij, « Smooth and efficient zooming and panning », l'`interpolateZoom` de d3).
+fn fly(from: Camera, to: Camera, t: f64) -> Camera {
+    let rho = FLIGHT_CURVE;
+    let (rho2, rho4) = (rho * rho, rho.powi(4));
+    // Vue : centre en pixels monde au zoom 0, largeur visible dans ces mêmes pixels.
+    let width = |zoom: f64| SCREEN_PIXELS / zoom.exp2();
+    let ([x0, y0], [x1, y1]) = (project(from.center, 0.0), project(to.center, 0.0));
+    let (w0, w1) = (width(from.zoom), width(to.zoom));
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let d2 = dx * dx + dy * dy;
+    let (u, w) = if d2 < 1e-12 {
+        // Sur place : un simple zoom, exponentiel.
+        (t, w0 * (w1 / w0).powf(t))
+    } else {
+        let d1 = d2.sqrt();
+        let b0 = (w1 * w1 - w0 * w0 + rho4 * d2) / (2.0 * w0 * rho2 * d1);
+        let b1 = (w1 * w1 - w0 * w0 - rho4 * d2) / (2.0 * w1 * rho2 * d1);
+        let r0 = ((b0 * b0 + 1.0).sqrt() - b0).ln();
+        let r1 = ((b1 * b1 + 1.0).sqrt() - b1).ln();
+        let s = t * (r1 - r0) / rho;
+        let u = w0 / (rho2 * d1) * (r0.cosh() * (rho * s + r0).tanh() - r0.sinh());
+        (u, w0 * r0.cosh() / (rho * s + r0).cosh())
+    };
+    Camera { center: unproject([x0 + u * dx, y0 + u * dy], 0.0), zoom: (SCREEN_PIXELS / w).log2() }
 }
 
 #[cfg(test)]
@@ -212,18 +223,21 @@ mod tests {
     }
 
     #[test]
-    fn a_jump_goes_from_the_city_to_the_wide_shot() {
-        let near = Camera { center: [4.85, 45.75], zoom: 14.0 };
-        let wide = Camera { center: [2.5, 46.6], zoom: 5.5 };
+    fn a_flight_climbs_between_two_cities_and_lands_on_the_next() {
+        let paris = Camera { center: [2.40, 48.85], zoom: 14.5 };
+        let lyon = Camera { center: [4.86, 45.75], zoom: 14.5 };
         let close = |a: Camera, b: Camera| {
-            (a.center[0] - b.center[0]).abs() < 1e-9
-                && (a.center[1] - b.center[1]).abs() < 1e-9
-                && (a.zoom - b.zoom).abs() < 1e-9
+            (a.center[0] - b.center[0]).abs() < 1e-6
+                && (a.center[1] - b.center[1]).abs() < 1e-6
+                && (a.zoom - b.zoom).abs() < 1e-6
         };
-        assert!(close(zoom_between(near, wide, 0.0), near));
-        assert!(close(zoom_between(near, wide, 1.0), wide));
-        // À mi-zoom, le centre n'a pas encore fait la moitié du chemin : la ville de départ reste en vue.
-        let middle = zoom_between(near, wide, 0.5);
-        assert!((middle.center[0] - near.center[0]).abs() < 0.4 * (near.center[0] - wide.center[0]), "{middle:?}");
+        assert!(close(fly(paris, lyon, 0.0), paris));
+        assert!(close(fly(paris, lyon, 1.0), lyon));
+        // À mi-vol, en vue d'avion : les deux villes tiennent à l'écran.
+        let middle = fly(paris, lyon, 0.5);
+        assert!(middle.zoom < 7.5, "{middle:?}");
+        // Le dézoom commence avant que la caméra ait beaucoup avancé.
+        let early = fly(paris, lyon, 0.15);
+        assert!(early.zoom < 12.0 && (early.center[0] - paris.center[0]) < 0.3, "{early:?}");
     }
 }
