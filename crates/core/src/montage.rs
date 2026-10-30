@@ -1,11 +1,13 @@
 //! `montage.json` : une vidéo faite de plusieurs runs déjà calculés, l'un après l'autre. Chaque segment
-//! garde sa tournée et sa caméra ; entre deux, la vidéo saute d'un fondu, sans trajet ni distance.
+//! garde sa tournée et sa caméra ; entre deux, la vidéo saute par un plan large (dézoom puis rezoom),
+//! sans trajet ni distance.
 
 use serde_json::Value;
 
 use crate::Issue;
 use crate::json::{field, finite, non_empty};
-use crate::run::{Run, VideoFormat, VideoSettings};
+use crate::geo::BBox;
+use crate::run::{Run, VideoFormat, VideoSettings, parse_bbox};
 use crate::theme::is_theme_name;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -14,6 +16,8 @@ pub struct Segment {
     pub run: String,
     /// Remplace le titre du run sur la carte d'infos.
     pub title: Option<String>,
+    /// Nom affiché sur le plan large, au début du segment.
+    pub city: Option<String>,
     pub duration_sec: f64,
     pub intro_sec: f64,
     pub outro_sec: f64,
@@ -27,14 +31,16 @@ pub struct Montage {
     pub theme: String,
     pub format: VideoFormat,
     pub fps: u32,
-    /// Durée du fondu entre deux segments.
-    pub fade_sec: f64,
+    /// Durée de chaque saut entre deux segments.
+    pub transition_sec: f64,
+    /// Ce que cadre le plan large ; à défaut, tous les tracés.
+    pub wide: Option<BBox>,
     pub segments: Vec<Segment>,
 }
 
 const SEGMENT_INTRO_SEC: f64 = 1.0;
 const SEGMENT_OUTRO_SEC: f64 = 1.0;
-const FADE_SEC: f64 = 0.5;
+const TRANSITION_SEC: f64 = 3.0;
 
 impl Montage {
     pub fn parse(raw: &Value) -> Result<Montage, Vec<Issue>> {
@@ -67,7 +73,18 @@ impl Montage {
         let fps = number(video, "fps", f64::from(VideoSettings::default().fps), "video.fps", &mut issues, |n| {
             n > 0.0 && n.fract() == 0.0
         });
-        let fade_sec = number(video, "fadeSec", FADE_SEC, "video.fadeSec", &mut issues, |n| n >= 0.0);
+        let transition_sec =
+            number(video, "transitionSec", TRANSITION_SEC, "video.transitionSec", &mut issues, |n| n >= 0.0);
+        let wide = match get("wide") {
+            None => None,
+            Some(raw) => {
+                let bbox = parse_bbox(raw);
+                if bbox.is_none() {
+                    issues.push(Issue::new("wide", "{ west, south, east, north } | absent"));
+                }
+                bbox
+            }
+        };
 
         let mut segments = Vec::new();
         match get("segments").and_then(Value::as_array).filter(|list| !list.is_empty()) {
@@ -94,6 +111,7 @@ impl Montage {
                     segments.push(Segment {
                         run: run.unwrap_or_default().to_owned(),
                         title: field(raw, "title").and_then(non_empty).map(|title| title.trim().to_owned()),
+                        city: field(raw, "city").and_then(non_empty).map(|city| city.trim().to_owned()),
                         duration_sec,
                         intro_sec,
                         outro_sec,
@@ -109,7 +127,8 @@ impl Montage {
                 theme: theme.to_owned(),
                 format,
                 fps: fps as u32,
-                fade_sec,
+                transition_sec,
+                wide,
                 segments,
             }),
             _ => Err(issues),
@@ -165,9 +184,10 @@ mod tests {
         json!({
             "name": "manifs",
             "theme": "rouge-noir",
-            "video": { "format": "9:16", "fadeSec": 0.4 },
+            "video": { "format": "9:16", "transitionSec": 2.5 },
+            "wide": { "west": -5.2, "south": 41.3, "east": 9.6, "north": 51.1 },
             "segments": [
-                { "run": "lyon", "title": "Lyon · 14 h", "durationSec": 6 },
+                { "run": "lyon", "title": "Lyon · 14 h", "city": "Lyon", "durationSec": 6 },
                 { "run": "nice", "durationSec": 5, "introSec": 0.5, "outroSec": 0 }
             ]
         })
@@ -176,8 +196,10 @@ mod tests {
     #[test]
     fn reads_segments_with_their_defaults() {
         let montage = Montage::parse(&montage()).unwrap();
-        assert_eq!((montage.format, montage.fps, montage.fade_sec), (VideoFormat::Portrait, 30, 0.4));
+        assert_eq!((montage.format, montage.fps, montage.transition_sec), (VideoFormat::Portrait, 30, 2.5));
+        assert_eq!(montage.wide.map(|wide| wide.west), Some(-5.2));
         assert_eq!(montage.segments[0].title.as_deref(), Some("Lyon · 14 h"));
+        assert_eq!(montage.segments[0].city.as_deref(), Some("Lyon"));
         assert_eq!((montage.segments[0].intro_sec, montage.segments[0].outro_sec), (1.0, 1.0));
         assert_eq!((montage.segments[1].intro_sec, montage.segments[1].outro_sec), (0.5, 0.0));
     }
@@ -187,9 +209,10 @@ mod tests {
         let mut raw = montage();
         raw["segments"][0]["durationSec"] = json!(0);
         raw["segments"][1]["run"] = json!("../x y");
-        raw["video"]["fadeSec"] = json!(-1);
+        raw["video"]["transitionSec"] = json!(-1);
+        raw["wide"] = json!({ "west": 9.6, "south": 41.3, "east": -5.2, "north": 51.1 });
         let paths: Vec<String> = Montage::parse(&raw).unwrap_err().into_iter().map(|issue| issue.path).collect();
-        assert_eq!(paths, ["video.fadeSec", "segments[0].durationSec", "segments[1].run"]);
+        assert_eq!(paths, ["video.transitionSec", "wide", "segments[0].durationSec", "segments[1].run"]);
         assert!(Montage::parse(&json!({ "name": "m", "segments": [] })).is_err());
     }
 

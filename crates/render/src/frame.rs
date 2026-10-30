@@ -201,9 +201,14 @@ fn bump(distance: f64) -> f64 {
 }
 
 fn overview(tour: &Tour) -> Camera {
+    fit(tour.path.points.iter().copied())
+}
+
+/// La caméra qui cadre tous les `points` (80 % de l'écran), nord en haut.
+pub fn fit(points: impl IntoIterator<Item = LonLat>) -> Camera {
     let (mut west, mut east, mut south, mut north) =
         (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
-    for &[lon, lat] in &tour.path.points {
+    for [lon, lat] in points {
         let y = mercator_degrees(lat);
         (west, east, south, north) = (west.min(lon), east.max(lon), south.min(y), north.max(y));
     }
@@ -225,7 +230,7 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
 }
 
-fn smoothstep(t: f64) -> f64 {
+pub fn smoothstep(t: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 

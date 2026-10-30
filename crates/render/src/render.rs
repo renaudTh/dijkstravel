@@ -8,7 +8,7 @@ pub use skia_safe::Image;
 use skia_safe::{Canvas, EncodedImageFormat, Rect, Surface, surfaces};
 
 use crate::atlas::Atlas;
-use crate::frame::{Animation, Moment};
+use crate::frame::{Animation, Camera, Moment};
 use crate::hud::{Hud, HudFrame};
 use crate::model::{Input, Tour, Video};
 use crate::route::Route;
@@ -83,6 +83,31 @@ impl Renderer {
             tour,
             input,
         }
+    }
+
+    /// Caméra de la première image (début de l'intro) et de la dernière (fin de l'outro).
+    pub fn first_camera(&self) -> Camera {
+        self.animation.camera_at(self.animation.moment_at(0))
+    }
+
+    pub fn last_camera(&self) -> Camera {
+        self.animation.camera_at(self.animation.moment_at(self.frame_count().saturating_sub(1)))
+    }
+
+    /// Le fond de carte vu par une caméra libre (plan large d'un montage), avec le tracé complet ou sans.
+    pub fn draw_view(&self, canvas: &Canvas, camera: Camera, with_route: bool) {
+        let (width, height) = (self.input.video.width, self.input.video.height);
+        let view = self.atlas.view(camera, width, height);
+        self.atlas.draw(canvas, view, width, height);
+        if with_route {
+            self.route.draw(canvas, &view, Rect::from_wh(width as f32, height as f32), self.animation.total_meters());
+        }
+    }
+
+    /// Les tuiles que lit `draw_view` pour cette caméra.
+    pub fn tiles_at(&self, camera: Camera) -> BTreeSet<String> {
+        let (width, height) = (self.input.video.width, self.input.video.height);
+        self.atlas.chunks_for(camera, width, height).into_iter().flat_map(|chunk| self.atlas.tiles_of(chunk)).collect()
     }
 
     /// La carte d'infos seule de l'image `frame`, par-dessus ce qui est déjà dessiné.

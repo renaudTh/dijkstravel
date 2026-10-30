@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use dijkstravel_core::montage::Montage;
-use dijkstravel_render::montage::Montage as Frames;
+use dijkstravel_render::montage::{City, Montage as Frames};
 use dijkstravel_render::render::Frames as _;
 
 use crate::console::Console;
@@ -39,8 +39,19 @@ pub fn render(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: O
     // Le thème du montage, lu une fois : chaque scène porte déjà son nom.
     let theme = load::theme(&scenes[0].run)?;
     let parts = scenes.iter().map(|scene| scene.renderer(theme.clone(), None)).collect::<Result<Vec<_>, _>>()?;
-    let fade = (montage.fade_sec * f64::from(montage.fps)).round() as u32;
-    let frames = Frames::new(parts, fade);
+    // Sur le plan large, chaque ville au début de son tracé.
+    let cities = montage
+        .segments
+        .iter()
+        .zip(&scenes)
+        .map(|(segment, scene)| City {
+            at: scene.tour.path.points[0],
+            name: segment.city.clone().or_else(|| scene.run.title.clone()).unwrap_or_else(|| segment.run.clone()),
+        })
+        .collect();
+    let wide = montage.wide.map(|b| vec![[b.west, b.south], [b.east, b.north]]);
+    let transition = (montage.transition_sec * f64::from(montage.fps)).round() as u32;
+    let frames = Frames::new(parts, cities, wide, transition);
     // Les tuiles vont dans le cache commun : la première scène suffit à les télécharger.
     let scene = &scenes[0];
     let console = Console { fps: montage.fps };
