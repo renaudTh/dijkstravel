@@ -33,12 +33,15 @@ pub struct Import {
     /// Titre de la carte d'infos, à la place du nom de la trace.
     #[arg(long)]
     pub title: Option<String>,
-    /// Thème (`themes/<nom>.json`).
-    #[arg(long, default_value = "default")]
-    pub theme: String,
+    /// Thème (`themes/<nom>.json`) ; par défaut `trail` pour une activité à pied, sinon `default`.
+    #[arg(long)]
+    pub theme: Option<String>,
     /// Format de la vidéo : `16:9` ou `9:16`.
     #[arg(long, default_value = "16:9", value_parser = ["16:9", "9:16"])]
     pub format: String,
+    /// Sans OpenStreetMap : départ et arrivée sans nom, aucun col ni sommet.
+    #[arg(long)]
+    pub offline: bool,
     /// Durée du trajet dans la vidéo, en secondes.
     #[arg(long, default_value_t = 60.0)]
     pub duration: f64,
@@ -66,19 +69,35 @@ pub fn main(import: Import) -> Outcome {
     let bbox = bbox_of(&recorded);
 
     let url = std::env::var("OVERPASS_URL").unwrap_or_else(|_| overpass::OVERPASS_URL.to_owned());
-    let place_name = |at| {
-        overpass::fetch(&url, &overpass::place_name_query(at)).ok().and_then(|raw| overpass::parse_place_name(&raw))
-    };
-    let start_name = place_name(start).unwrap_or_else(|| "Départ".to_owned());
-    let finish_name = place_name(finish).unwrap_or_else(|| "Arrivée".to_owned());
-    let markers =
-        match overpass::fetch(&url, &overpass::summits_query(&bbox)).and_then(|raw| overpass::parse_summits(&raw)) {
-            Ok(summits) => climbs(&recorded, &summits),
-            Err(error) => {
-                eprintln!("Cols et sommets introuvables ({error}) : run sans repères.");
-                Vec::new()
-            }
+    let place_name = |at, fallback: &str| {
+        let found = if import.offline {
+            Ok(None)
+        } else {
+            fetch(&url, &overpass::place_name_query(at)).map(|raw| overpass::parse_place_name(&raw))
         };
+        match found {
+            Ok(Some(name)) => name,
+            Ok(None) => fallback.to_owned(),
+            Err(error) => {
+                eprintln!("{fallback} sans nom ({error}) : à renommer dans places.geojson et tour.json.");
+                fallback.to_owned()
+            }
+        }
+    };
+    let start_name = place_name(start, "Départ");
+    let finish_name = place_name(finish, "Arrivée");
+    let summits = if import.offline {
+        Ok(Vec::new())
+    } else {
+        fetch(&url, &overpass::summits_query(&bbox)).and_then(|raw| overpass::parse_summits(&raw))
+    };
+    let markers = match summits {
+        Ok(summits) => climbs(&recorded, &summits),
+        Err(error) => {
+            eprintln!("Cols et sommets introuvables ({error}) : run sans repères.");
+            Vec::new()
+        }
+    };
 
     let schedule = match (recorded.timeline.first(), recorded.timeline.last()) {
         (Some(&[_, departure]), Some(&[_, arrival])) => Some(json!({
@@ -113,7 +132,7 @@ pub fn main(import: Import) -> Outcome {
         "start": { "place": depart },
         "mode": "open",
         "profile": if on_foot { "foot" } else { "car" },
-        "theme": import.theme,
+        "theme": import.theme.clone().unwrap_or_else(|| (if on_foot { "trail" } else { "default" }).to_owned()),
         "video": { "format": import.format, "durationSec": import.duration, "introSec": 2, "outroSec": 4 },
     });
     if let Some(schedule) = schedule {
@@ -166,6 +185,22 @@ pub fn main(import: Import) -> Outcome {
         println!("  km {:5.1}  {}", marker.meters / 1000.0, marker.name);
     }
     Ok(())
+}
+
+/// Une requête Overpass, réessayée deux fois : l'instance publique répond souvent 502 ou 504 un moment.
+fn fetch(url: &str, query: &str) -> Result<serde_json::Value, String> {
+    let mut attempt = 1;
+    loop {
+        match overpass::fetch(url, query) {
+            Ok(raw) => return Ok(raw),
+            Err(error) if attempt >= 3 => return Err(error),
+            Err(error) => {
+                eprintln!("{error} : nouvel essai dans {} s.", 10 * attempt);
+                std::thread::sleep(std::time::Duration::from_secs(10 * attempt));
+                attempt += 1;
+            }
+        }
+    }
 }
 
 /// Le cadre du tracé, avec une marge d'environ 500 m.
