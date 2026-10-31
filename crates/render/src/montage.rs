@@ -246,7 +246,7 @@ fn fly(from: Camera, to: Camera, t: f64) -> Camera {
         let u = w0 / (rho2 * d1) * (r0.cosh() * (rho * s + r0).tanh() - r0.sinh());
         (u, w0 * r0.cosh() / (rho * s + r0).cosh())
     };
-    Camera { center: unproject([x0 + u * dx, y0 + u * dy], 0.0), zoom: (SCREEN_PIXELS / w).log2() }
+    Camera::flat(unproject([x0 + u * dx, y0 + u * dy], 0.0), (SCREEN_PIXELS / w).log2())
 }
 
 #[cfg(test)]
@@ -268,8 +268,8 @@ mod tests {
 
     #[test]
     fn a_flight_climbs_between_two_cities_and_lands_on_the_next() {
-        let paris = Camera { center: [2.40, 48.85], zoom: 14.5 };
-        let lyon = Camera { center: [4.86, 45.75], zoom: 14.5 };
+        let paris = Camera::flat([2.40, 48.85], 14.5);
+        let lyon = Camera::flat([4.86, 45.75], 14.5);
         let close = |a: Camera, b: Camera| {
             (a.center[0] - b.center[0]).abs() < 1e-6
                 && (a.center[1] - b.center[1]).abs() < 1e-6

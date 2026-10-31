@@ -131,6 +131,14 @@ pub struct CameraTheme {
     /// Durée des étapes (`Tour::stages`) : 0, selon leur longueur ; 1, toutes la même ; entre les deux,
     /// une étape dure comme sa longueur à la puissance `1 - evenStages`.
     pub even_stages: f64,
+    /// Inclinaison de la caméra pendant le parcours, en degrés : 0, carte à plat nord en haut ; au-delà,
+    /// vue en relief qui suit le cap du tracé (étapes, parcours à petite échelle).
+    pub pitch: f64,
+    /// Longueur de tracé sur laquelle le cap de la caméra inclinée est lissé, en écrans (petit côté) :
+    /// plus grand, la caméra tourne moins dans les lacets.
+    pub heading_window: f64,
+    /// Exagération du relief de la vue inclinée.
+    pub terrain_exaggeration: f64,
 }
 
 /// Imagerie du fond : `nasa` (Blue Marble, pays et régions), `ign` (orthophoto, villes de France),
@@ -144,7 +152,7 @@ pub const SEA_IMAGERIES: [&str; 4] = ["", "nasa", "ign", "sentinel"];
 pub const HUD_FONTS: [&str; 6] = ["Nunito", "Quicksand", "Fredoka", "Baloo 2", "Poppins", "Comfortaa"];
 
 /// Bornes des réglages numériques, partagées par la validation et les curseurs de l'éditeur.
-pub const NUMBER_RANGES: [(&str, f64, f64); 21] = [
+pub const NUMBER_RANGES: [(&str, f64, f64); 24] = [
     ("route.width", 2.0, 40.0),
     ("route.coreRatio", 0.0, 1.0),
     ("route.coreBlurRatio", 0.0, 1.0),
@@ -166,6 +174,9 @@ pub const NUMBER_RANGES: [(&str, f64, f64); 21] = [
     ("camera.stopSlowdown", 0.0, 5.0),
     ("camera.markerSlowdown", 0.0, 5.0),
     ("camera.evenStages", 0.0, 1.0),
+    ("camera.pitch", 0.0, 70.0),
+    ("camera.headingWindow", 0.2, 4.0),
+    ("camera.terrainExaggeration", 1.0, 3.0),
 ];
 
 impl Default for Theme {
@@ -237,6 +248,9 @@ impl Default for Theme {
                 stop_slowdown: 0.0,
                 marker_slowdown: 0.0,
                 even_stages: 0.0,
+                pitch: 0.0,
+                heading_window: 1.0,
+                terrain_exaggeration: 1.0,
             },
         }
     }
@@ -382,6 +396,9 @@ impl Theme {
                 stop_slowdown: r.number("camera.stopSlowdown", d.camera.stop_slowdown),
                 marker_slowdown: r.number("camera.markerSlowdown", d.camera.marker_slowdown),
                 even_stages: r.number("camera.evenStages", d.camera.even_stages),
+                pitch: r.number("camera.pitch", d.camera.pitch),
+                heading_window: r.number("camera.headingWindow", d.camera.heading_window),
+                terrain_exaggeration: r.number("camera.terrainExaggeration", d.camera.terrain_exaggeration),
             },
         };
         if r.issues.is_empty() { Ok(theme) } else { Err(r.issues) }

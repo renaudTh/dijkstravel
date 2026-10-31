@@ -53,6 +53,8 @@
   "camera": {
     "followFraction": 0.09,
     "stopSlowdown": 0.6,
-    "markerSlowdown": 2
+    "markerSlowdown": 2,
+    "pitch": 55,
+    "terrainExaggeration": 1.5
   }
 }

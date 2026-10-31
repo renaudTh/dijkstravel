@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::geo::LonLat;
+use crate::geo::{LonLat, MeasuredPath};
+use crate::mercator::project;
 use crate::model::{CameraTheme, Tour, Video};
 
 /// En nombre d'images.
@@ -49,6 +50,17 @@ pub struct Hud {
 pub struct Camera {
     pub center: LonLat,
     pub zoom: f64,
+    /// Inclinaison en degrés : 0, vue du dessus.
+    pub pitch: f64,
+    /// Cap en haut de l'écran, en degrés dans le sens horaire depuis le nord.
+    pub bearing: f64,
+}
+
+impl Camera {
+    /// Vue du dessus, nord en haut.
+    pub fn flat(center: LonLat, zoom: f64) -> Self {
+        Camera { center, zoom, pitch: 0.0, bearing: 0.0 }
+    }
 }
 
 const SMOOTHING_SAMPLES: usize = 21;
@@ -64,6 +76,11 @@ const TRANSFER_SCREENS: f64 = 0.5;
 const TRANSFER_FADE: f64 = 0.25;
 /// Demi-zone de ralentissement autour d'un repère, en écrans (petit côté) : la caméra freine en l'approchant.
 const MARKER_SCREENS: f64 = 0.6;
+/// Échantillons du cap par fenêtre de lissage (`camera.headingWindow`).
+const HEADING_SAMPLES_PER_WINDOW: f64 = 32.0;
+/// La corde qui donne le cap brut commence cette part de fenêtre derrière la tête : la caméra regarde
+/// surtout où va le tracé.
+const HEADING_BEHIND: f64 = 0.5;
 
 fn progress_of(index: u32, count: u32) -> f64 {
     if count <= 1 { 1.0 } else { (f64::from(index) / f64::from(count - 1)).min(1.0) }
@@ -85,6 +102,10 @@ pub struct Animation {
     overview: Camera,
     /// Un transfert dure au plus le temps de parcourir cette distance en course.
     transfer_meters: f64,
+    /// Inclinaison du parcours (`camera.pitch`).
+    pitch: f64,
+    /// Cap de la caméra inclinée le long du tracé ; absent à plat.
+    headings: Option<Headings>,
 }
 
 impl Animation {
@@ -100,7 +121,18 @@ impl Animation {
             || (camera.marker_slowdown != 0.0 && !tour.markers.is_empty());
         let pace = (paced && total != 0.0).then(|| pace_of(&tour, total, camera, zones));
         let transfer_meters = zones.transfer;
-        Animation { tour, timeline: Timeline::new(video), follow_fraction, total, pace, overview, transfer_meters }
+        let headings = (camera.pitch > 0.0).then(|| Headings::new(&tour.path, camera.heading_window * screen));
+        Animation {
+            tour,
+            timeline: Timeline::new(video),
+            follow_fraction,
+            total,
+            pace,
+            overview,
+            transfer_meters,
+            pitch: camera.pitch,
+            headings,
+        }
     }
 
     /// Part du fond des transferts à `meters` (`transfer_blend`).
@@ -182,7 +214,8 @@ impl Animation {
         travel_zoom(self.overview, self.follow_fraction)
     }
 
-    /// Nord en haut, à plat ; le centre suit une moyenne glissante du tracé, pas la tête elle-même.
+    /// Le centre suit une moyenne glissante du tracé, pas la tête elle-même ; à plat nord en haut, incliné
+    /// face au cap lissé du tracé.
     fn travel_camera(&self, meters: f64) -> Camera {
         let zoom = self.travel_zoom();
         let window = visible_meters(self.overview, zoom) * 0.5;
@@ -193,8 +226,84 @@ impl Animation {
             sum = [sum[0] + point[0], sum[1] + point[1]];
         }
         let count = SMOOTHING_SAMPLES as f64;
-        Camera { center: [sum[0] / count, sum[1] / count], zoom }
+        let center = [sum[0] / count, sum[1] / count];
+        match &self.headings {
+            Some(headings) => Camera { center, zoom, pitch: self.pitch, bearing: headings.at(meters) },
+            None => Camera::flat(center, zoom),
+        }
     }
+}
+
+/// Cap lissé de la caméra inclinée, échantillonné le long du tracé, sans retour à 360° près : il ne
+/// dépend que de la distance parcourue, les images se rendant dans le désordre.
+struct Headings {
+    step: f64,
+    /// Degrés, dans le sens horaire depuis le nord, déroulés (ils peuvent dépasser 360).
+    bearings: Vec<f64>,
+}
+
+impl Headings {
+    /// `window` : longueur de tracé, en mètres, sur laquelle le cap est lissé.
+    fn new(path: &MeasuredPath, window: f64) -> Self {
+        let total = path.total_meters();
+        let window = window.max(1.0);
+        let step = window / HEADING_SAMPLES_PER_WINDOW;
+        let count = (total / step).ceil() as usize + 1;
+        // Cap brut : la corde du tracé autour de la tête, un peu en avant ; une corde nulle (boucle
+        // refermée, tracé immobile) garde le cap précédent.
+        let mut raw: Vec<f64> = Vec::with_capacity(count);
+        for i in 0..count {
+            let at = i as f64 * step;
+            let [x0, y0] = project(path.point_at(at - window * HEADING_BEHIND), 0.0);
+            let [x1, y1] = project(path.point_at(at + window), 0.0);
+            let (dx, dy) = (x1 - x0, y1 - y0);
+            let previous = raw.last().copied();
+            if dx.hypot(dy) < 1e-12 {
+                raw.push(previous.unwrap_or(0.0));
+                continue;
+            }
+            // y Mercator vers le sud : le nord est en −y.
+            let bearing = dx.atan2(-dy).to_degrees();
+            raw.push(match previous {
+                Some(previous) => previous + shortest_turn(previous, bearing),
+                None => bearing,
+            });
+        }
+        // Lissage gaussien d'une demi-fenêtre d'écart type : les lacets ne font pas tourner la caméra.
+        let sigma = HEADING_SAMPLES_PER_WINDOW / 2.0;
+        let radius = (3.0 * sigma).ceil() as isize;
+        let weights: Vec<f64> =
+            (-radius..=radius).map(|k| (-(k as f64).powi(2) / (2.0 * sigma * sigma)).exp()).collect();
+        let bearings = (0..count as isize)
+            .map(|i| {
+                let (mut sum, mut weight) = (0.0, 0.0);
+                for (k, w) in (-radius..=radius).zip(&weights) {
+                    let j = (i + k).clamp(0, count as isize - 1) as usize;
+                    sum += raw[j] * w;
+                    weight += w;
+                }
+                sum / weight
+            })
+            .collect();
+        Headings { step, bearings }
+    }
+
+    fn at(&self, meters: f64) -> f64 {
+        let last = self.bearings.len() - 1;
+        let position = (meters / self.step).clamp(0.0, last as f64);
+        let i = (position.floor() as usize).min(last.saturating_sub(1));
+        let t = position - i as f64;
+        let bearing = match self.bearings.get(i + 1) {
+            Some(&next) => lerp(self.bearings[i], next, t),
+            None => self.bearings[i],
+        };
+        bearing.rem_euclid(360.0)
+    }
+}
+
+/// Plus petit angle, signé, pour tourner du cap `from` au cap `to`, en degrés.
+fn shortest_turn(from: f64, to: f64) -> f64 {
+    (to - from + 180.0).rem_euclid(360.0) - 180.0
 }
 
 fn travel_zoom(overview: Camera, follow_fraction: f64) -> f64 {
@@ -304,16 +413,19 @@ fn fit(points: impl IntoIterator<Item = LonLat>) -> Camera {
         (west, east, south, north) = (west.min(lon), east.max(lon), south.min(y), north.max(y));
     }
     let span = (east - west).max(north - south).max(0.01);
-    Camera {
-        center: [(west + east) / 2.0, inverse_mercator_degrees((south + north) / 2.0)],
-        zoom: ((SCREEN_PIXELS * 0.8 * 360.0) / (512.0 * span)).log2().clamp(1.0, 16.0),
-    }
+    Camera::flat(
+        [(west + east) / 2.0, inverse_mercator_degrees((south + north) / 2.0)],
+        ((SCREEN_PIXELS * 0.8 * 360.0) / (512.0 * span)).log2().clamp(1.0, 16.0),
+    )
 }
 
+/// Le cap tourne par le plus court chemin.
 fn blend(from: Camera, to: Camera, t: f64) -> Camera {
     Camera {
         center: [lerp(from.center[0], to.center[0], t), lerp(from.center[1], to.center[1], t)],
         zoom: lerp(from.zoom, to.zoom, t),
+        pitch: lerp(from.pitch, to.pitch, t),
+        bearing: (from.bearing + shortest_turn(from.bearing, to.bearing) * t).rem_euclid(360.0),
     }
 }
 
@@ -336,6 +448,29 @@ fn inverse_mercator_degrees(y: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_heading_faces_the_way_and_ignores_hairpins() {
+        // Vers l'est.
+        let east = MeasuredPath::measure(vec![[0.0, 45.0], [0.1, 45.0]]);
+        let headings = Headings::new(&east, 1_000.0);
+        assert!((headings.at(4_000.0) - 90.0).abs() < 1e-6);
+        // Des lacets de 200 m de large qui montent vers le nord : le cap lissé sur 2 km reste au nord.
+        let zigzag: Vec<LonLat> =
+            (0..=40).map(|i| [if i % 2 == 0 { 0.0 } else { 0.0025 }, 45.0 + i as f64 * 0.001]).collect();
+        let headings = Headings::new(&MeasuredPath::measure(zigzag), 2_000.0);
+        let bearing = headings.at(2_500.0);
+        assert!(shortest_turn(0.0, bearing).abs() < 15.0, "cap {bearing}");
+    }
+
+    #[test]
+    fn the_bearing_blends_the_short_way_round() {
+        let from = Camera { bearing: 350.0, ..Camera::flat([0.0, 0.0], 10.0) };
+        let to = Camera { bearing: 10.0, pitch: 60.0, ..Camera::flat([0.0, 0.0], 10.0) };
+        let half = blend(from, to, 0.5);
+        assert!(half.bearing.abs() < 1e-9 || (half.bearing - 360.0).abs() < 1e-9);
+        assert!((half.pitch - 30.0).abs() < 1e-9);
+    }
 
     /// Temps d'un transfert, en mètres de course : l'intégrale de sa lenteur.
     fn transfer_time(length: f64, transfer_meters: f64) -> f64 {

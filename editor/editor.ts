@@ -142,6 +142,9 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'range', path: 'camera.stopSlowdown', label: 'Ralentissement aux lieux', step: 0.1 },
       { kind: 'range', path: 'camera.markerSlowdown', label: 'Ralentissement aux sprints et ascensions', step: 0.1 },
       { kind: 'range', path: 'camera.evenStages', label: 'Égaliser la durée des étapes', step: 0.05 },
+      { kind: 'range', path: 'camera.pitch', label: 'Inclinaison (0 : à plat)', step: 1 },
+      { kind: 'range', path: 'camera.headingWindow', label: 'Lissage du cap, en écrans', step: 0.1 },
+      { kind: 'range', path: 'camera.terrainExaggeration', label: 'Exagération du relief', step: 0.1 },
     ],
   },
 ];
