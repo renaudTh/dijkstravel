@@ -11,10 +11,12 @@ use crate::atlas::Atlas;
 use crate::frame::{Animation, Camera, Moment};
 use crate::hud::{Hud, HudFrame};
 use crate::markers::Markers;
+use crate::mercator::Projection;
 use crate::model::{Input, Tour, Video};
 use crate::route::Route;
 use crate::sprites::Fonts;
 use crate::stops::{Stops, StopsFrame};
+use crate::terrain3d::Terrain3d;
 
 /// Durée de l'effet « pop » d'un lieu atteint, en secondes de vidéo.
 const POP_SECONDS: f64 = 0.6;
@@ -53,6 +55,8 @@ pub struct Renderer {
     atlas: Arc<Atlas>,
     /// Le fond des transferts, s'il y en a un et des transferts.
     transfer_atlas: Option<Atlas>,
+    /// La vue inclinée en relief (`camera.pitch`), si le GPU le permet.
+    terrain: Option<Terrain3d>,
     route: Route,
     stops: Stops,
     markers: Markers,
@@ -76,6 +80,12 @@ impl Renderer {
             transfer.sea_imagery = None;
             Atlas::new(travel_zoom, &transfer)
         });
+        let (width, height) = (input.video.width, input.video.height);
+        let terrain = (theme.camera.pitch > 0.0)
+            .then(|| Terrain3d::new(&atlas, &theme.basemap, theme.camera.terrain_exaggeration, width, height))
+            .and_then(|terrain| {
+                terrain.map_err(|error| eprintln!("vue inclinée impossible, rendu à plat : {error}")).ok()
+            });
         let fonts = Fonts::new();
         // Chaque imagerie dessinée est créditée, une fois.
         let mut credits: Vec<&str> = Vec::new();
@@ -119,6 +129,7 @@ impl Renderer {
             ),
             atlas,
             transfer_atlas,
+            terrain,
             animation,
             fade_labels_at_outro: true,
             tour,
@@ -197,6 +208,9 @@ impl Frames for Renderer {
 
     fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String> {
         let (width, height) = (self.input.video.width, self.input.video.height);
+        if let Some(terrain) = &self.terrain {
+            return self.needed_tiles_3d(terrain, frames);
+        }
         let mut chunks = BTreeSet::new();
         let mut transfer_chunks = BTreeSet::new();
         for frame in frames {
@@ -219,38 +233,83 @@ impl Frames for Renderer {
 
     fn draw(&self, canvas: &Canvas, frame: u32, with_hud: bool) {
         let (width, height) = (self.input.video.width, self.input.video.height);
-        let screen = Rect::from_wh(width as f32, height as f32);
         let moment = self.animation.moment_at(frame);
         let camera = self.animation.camera_at(moment);
+        let meters = self.animation.meters_of(moment);
+        let blend = self.animation.transfer_blend(meters);
+        if let Some(terrain) = &self.terrain {
+            let perspective = terrain.perspective(&self.atlas, camera, width, height);
+            let transfer = self.transfer_atlas.as_ref().map(|transfer| (transfer, blend));
+            let rendered = terrain.render(&self.atlas, transfer, &perspective);
+            canvas.draw_image(&rendered.image, (0, 0), None);
+            let projection = terrain.projection(&self.atlas, &perspective, &rendered.depth);
+            self.draw_overlays(canvas, &projection, frame, with_hud);
+            return;
+        }
         let view = self.atlas.view(camera, width, height);
         self.atlas.draw(canvas, view, width, height);
-
-        let meters = self.animation.meters_of(moment);
-        if let Some(transfer) = &self.transfer_atlas {
-            let blend = self.animation.transfer_blend(meters);
-            if blend > 0.0 {
-                canvas.save_layer_alpha_f(None, blend as f32);
-                transfer.draw(canvas, transfer.view(camera, width, height), width, height);
-                canvas.restore();
-            }
+        if let Some(transfer) = &self.transfer_atlas
+            && blend > 0.0
+        {
+            canvas.save_layer_alpha_f(None, blend as f32);
+            transfer.draw(canvas, transfer.view(camera, width, height), width, height);
+            canvas.restore();
         }
+        self.draw_overlays(canvas, &view, frame, with_hud);
+    }
+}
+
+impl Renderer {
+    /// Tracé, tête, repères, lieux et carte d'infos de l'image, par-dessus le fond.
+    fn draw_overlays(&self, canvas: &Canvas, view: &dyn Projection, frame: u32, with_hud: bool) {
+        let (width, height) = (self.input.video.width, self.input.video.height);
+        let screen = Rect::from_wh(width as f32, height as f32);
+        let moment = self.animation.moment_at(frame);
+        let meters = self.animation.meters_of(moment);
         let hud = self.animation.hud_at(meters);
-        self.route.draw(canvas, &view, screen, meters);
+        self.route.draw(canvas, view, screen, meters);
         // Ni avant le départ, ni sur la vue d'ensemble finale, ni entre deux étapes.
         if matches!(moment, Moment::Travel { .. }) && !self.tour.in_transfer(meters) {
-            self.route.draw_head(canvas, &view, meters);
+            self.route.draw_head(canvas, view, meters);
         }
         let pop_meters = self.pop_meters();
         let label_opacity = match moment {
             Moment::Outro { progress } if self.fade_labels_at_outro => (1.0 - progress / LABEL_FADE_PROGRESS).max(0.0),
             _ => 1.0,
         };
-        self.markers.draw(canvas, &view, screen, meters, pop_meters, label_opacity as f32);
+        self.markers.draw(canvas, view, screen, meters, pop_meters, label_opacity as f32);
         let stops_frame = StopsFrame { visited: hud.visited, meters, pop_meters, label_opacity: label_opacity as f32 };
-        self.stops.draw(canvas, &view, screen, &stops_frame);
+        self.stops.draw(canvas, view, screen, &stops_frame);
         if with_hud {
             self.draw_hud(canvas, frame);
         }
+    }
+
+    /// Les tuiles des morceaux en relief que voient les images `frames`, et de leurs maillages.
+    fn needed_tiles_3d(&self, terrain: &Terrain3d, frames: std::ops::Range<u32>) -> Vec<String> {
+        let (width, height) = (self.input.video.width, self.input.video.height);
+        let exaggeration = self.input.theme.camera.terrain_exaggeration;
+        let mut chunks = BTreeSet::new();
+        let mut transfer_chunks = BTreeSet::new();
+        for frame in frames {
+            let moment = self.animation.moment_at(frame);
+            let camera = self.animation.camera_at(moment);
+            // L'emprise ne dépend pas de l'altitude du point visé : sans la lire, pas de relief encore
+            // absent du cache mis en mémoire comme manquant.
+            let perspective = crate::perspective::Perspective::new(camera, width, height, 0.0, exaggeration);
+            let seen = terrain.chunks(&self.atlas, &perspective);
+            if self.transfer_atlas.is_some() && self.animation.transfer_blend(self.animation.meters_of(moment)) > 0.0 {
+                transfer_chunks.extend(seen.iter().copied());
+            }
+            chunks.extend(seen);
+        }
+        let chunks: Vec<_> = chunks.into_iter().collect();
+        let mut tiles = terrain.tiles_of(&self.atlas, &chunks);
+        if let Some(transfer) = &self.transfer_atlas {
+            let transfer_chunks: Vec<_> = transfer_chunks.into_iter().collect();
+            tiles.extend(transfer_chunks.iter().flat_map(|&key| transfer.tiles_of(key)));
+        }
+        tiles.into_iter().collect()
     }
 }
 

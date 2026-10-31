@@ -49,8 +49,10 @@ pub struct FrameSettings {
 
 /// Un morceau d'atlas à dessiner.
 pub struct ChunkDraw<'a> {
-    /// Identifie la texture du morceau et son maillage d'une image à l'autre.
+    /// Identifie la texture du morceau d'une image à l'autre.
     pub key: u64,
+    /// Identifie son maillage.
+    pub mesh_key: u64,
     /// Identifie la texture du même morceau dans le fond des transferts, s'il se voit.
     pub transfer_key: Option<u64>,
     /// Coin haut gauche du morceau en repère local, côté en pixels monde au zoom de la caméra.
@@ -345,7 +347,7 @@ impl Gpu {
                         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&transfer) },
                     ],
                 });
-                (group, self.mesh(chunk.key, chunk.mesh))
+                (group, self.mesh(chunk.mesh_key, chunk.mesh))
             })
             .collect();
 
@@ -648,6 +650,7 @@ mod tests {
         let size = 4000.0;
         let chunk = ChunkDraw {
             key: 1,
+            mesh_key: 1,
             transfer_key: None,
             origin: [-size / 2.0, size / 2.0],
             size,

@@ -22,7 +22,7 @@ use crate::tiles::{DEFAULT_SEA_SHARE, TileKey, TileStore};
 
 pub const CHUNK: i32 = 512;
 /// Bordure dessinée en plus autour d'un morceau : le filtrage bilinéaire lit les pixels voisins.
-const APRON: i32 = 2;
+pub const APRON: i32 = 2;
 /// Morceaux gardés : 1 Mo chacun.
 const CHUNKS: usize = 384;
 
@@ -35,6 +35,8 @@ pub struct ChunkKey {
 }
 
 pub struct Atlas {
+    /// Distingue les atlas d'un même processus : les textures du GPU sont rangées par atlas et morceau.
+    pub id: u64,
     /// Ce dont dépend tout l'atlas : un aperçu qui ne change rien de tout ça le reprend tel quel.
     depends_on: (u64, BasemapTheme, ImagerySource, TileSource, TileSource, String),
     travel_zoom: f64,
@@ -61,7 +63,9 @@ impl Atlas {
         let basemap = &input.theme.basemap;
         let (dir, terrain, vector) = (&input.tile_dir, &input.terrain, &input.vector);
         let elevation = Arc::new(Elevation::new(dir, &terrain.name, terrain.maxzoom));
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Atlas {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             depends_on: (
                 travel_zoom.to_bits(),
                 basemap.clone(),
@@ -106,12 +110,16 @@ impl Atlas {
         self.elevation.clone()
     }
 
+    pub fn travel_zoom(&self) -> f64 {
+        self.travel_zoom
+    }
+
     pub fn level_zoom(&self, level: u32) -> f64 {
         self.travel_zoom - f64::from(level)
     }
 
     /// Niveau au zoom égal ou juste au-dessus : l'image ne fait que réduire, jamais agrandir.
-    fn level_for(&self, zoom: f64) -> u32 {
+    pub fn level_for(&self, zoom: f64) -> u32 {
         (self.travel_zoom - zoom + 1e-9).floor().max(0.0) as u32
     }
 
@@ -241,7 +249,7 @@ impl Atlas {
         tiles
     }
 
-    fn chunk(&self, key: ChunkKey) -> Image {
+    pub fn chunk(&self, key: ChunkKey) -> Image {
         self.chunks.get_or_insert_with(&key, || self.render_chunk(key))
     }
 

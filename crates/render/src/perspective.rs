@@ -16,6 +16,10 @@ use crate::mercator::{Projection, project, unproject};
 const FOV_Y: f64 = 0.643_501_108_793_284_4;
 /// Au-delà de cet angle depuis la verticale, le sol n'est plus dessiné : brouillard, puis ciel.
 const MAX_RAY_ANGLE: f64 = 78.0 * std::f64::consts::PI / 180.0;
+/// Part de la distance dessinée où commence le brouillard, quand l'horizon est en vue.
+const FOG_START: f64 = 0.45;
+/// Le brouillard monte quand le haut de l'écran approche de `MAX_RAY_ANGLE` sur cet angle : à plat, aucun.
+const FOG_RAMP: f64 = 25.0 * std::f64::consts::PI / 180.0;
 /// Plan proche, en part de la distance de la caméra au point visé.
 const NEAR: f64 = 0.01;
 const EARTH_CIRCUMFERENCE: f64 = 40_075_016.686;
@@ -36,6 +40,8 @@ pub struct Perspective {
     distance: f64,
     /// Plus grande distance au sol dessinée depuis l'aplomb de la caméra, en pixels monde.
     max_ground: f64,
+    near: f64,
+    far: f64,
     eye: DVec3,
     view_projection: DMat4,
     inverse: DMat4,
@@ -52,8 +58,9 @@ impl Perspective {
         let (pitch, bearing) = (camera.pitch.to_radians(), camera.bearing.to_radians());
         let forward = DVec3::new(bearing.sin(), bearing.cos(), 0.0);
         let eye = (DVec3::Z * pitch.cos() - forward * pitch.sin()) * distance;
-        // Le plus loin que voit le rayon du haut de l'écran, borné par `MAX_RAY_ANGLE`.
-        let top_ray = (pitch + FOV_Y / 2.0).min(MAX_RAY_ANGLE);
+        // Le plus loin que voit un coin du haut de l'écran, borné par `MAX_RAY_ANGLE`.
+        let half_diagonal = ((FOV_Y / 2.0).tan() * (1.0 + (width / height).powi(2)).sqrt()).atan();
+        let top_ray = (pitch + half_diagonal).min(MAX_RAY_ANGLE);
         let max_ground = eye.z * top_ray.tan();
         let far = (max_ground.hypot(eye.z) + distance) * 1.01;
         let view = view::look_at_mat4(eye, DVec3::ZERO, forward * pitch.cos() + DVec3::Z * pitch.sin());
@@ -68,6 +75,8 @@ impl Perspective {
             z_per_meter: exaggeration / meters_per_pixel,
             distance,
             max_ground,
+            near: distance * NEAR,
+            far,
             eye,
             view_projection,
             inverse: view_projection.inverse(),
@@ -129,6 +138,59 @@ impl Perspective {
                 self.to_lon_lat(point)
             })
             .collect()
+    }
+
+    /// Profondeur `screen_at` (non linéaire) changée en distance à la caméra le long de l'axe de visée,
+    /// en pixels monde : deux profondeurs s'y comparent avec une marge relative.
+    pub fn linear_depth(&self, depth: f64) -> f64 {
+        self.near * self.far / (self.far - depth * (self.far - self.near))
+    }
+
+    /// Caméra en repère local.
+    pub fn eye(&self) -> DVec3 {
+        self.eye
+    }
+
+    /// Plus grande distance au sol dessinée depuis l'aplomb de la caméra, en pixels monde : la fin du
+    /// brouillard.
+    pub fn max_ground(&self) -> f64 {
+        self.max_ground
+    }
+
+    /// Distances au sol (pixels monde) où le brouillard commence et où il recouvre tout : rien à plat,
+    /// une brume vers l'horizon quand la caméra le voit.
+    pub fn fog(&self) -> [f64; 2] {
+        let reach = self.camera.pitch.to_radians() + FOV_Y / 2.0;
+        let t = ((reach - (MAX_RAY_ANGLE - FOG_RAMP)) / FOG_RAMP).clamp(0.0, 1.0);
+        let t = t * t * (3.0 - 2.0 * t);
+        let lerp = |a: f64, b: f64| a + (b - a) * t;
+        [self.max_ground * lerp(1.2, FOG_START), self.max_ground * lerp(1.5, 1.0)]
+    }
+
+    /// Pixel monde, au zoom de la caméra, du point visé.
+    pub fn target(&self) -> [f64; 2] {
+        self.target
+    }
+
+    pub fn ground(&self) -> f64 {
+        self.ground
+    }
+
+    pub fn z_per_meter(&self) -> f64 {
+        self.z_per_meter
+    }
+
+    pub fn size(&self) -> [f64; 2] {
+        [self.width, self.height]
+    }
+
+    /// L'horizon (le sol au bout du brouillard, droit devant) en y normalisé : −1 en bas de l'écran, 1 en
+    /// haut ; plus de 1 s'il est au-dessus de l'écran.
+    pub fn horizon(&self) -> f64 {
+        let bearing = self.camera.bearing.to_radians();
+        let ahead = self.eye.truncate() + glam::DVec2::new(bearing.sin(), bearing.cos()) * self.max_ground;
+        let clip = self.view_projection * ahead.extend(0.0).extend(1.0);
+        if clip.w <= 0.0 { 2.0 } else { clip.y / clip.w }
     }
 
     /// Distance de la caméra au point visé, en pixels monde : l'échelle du brouillard.

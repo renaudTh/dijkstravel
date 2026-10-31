@@ -26,5 +26,6 @@ pub mod route;
 pub mod scene;
 pub mod sprites;
 pub mod stops;
+pub mod terrain3d;
 
 pub use infra::{download, tiles, video};
