@@ -58,6 +58,20 @@ impl Elevation {
         }
     }
 
+    /// Les mêmes sources, sans rien en mémoire : ce qu'elle lit avant que le cache soit rempli (une tuile
+    /// encore absente, retenue comme manquante) ne trouble pas la lecture d'après.
+    pub fn detached(&self) -> Self {
+        Elevation {
+            name: self.name.clone(),
+            maxzoom: self.maxzoom,
+            minzoom: self.minzoom,
+            dir: self.dir.clone(),
+            bounds: self.bounds.clone(),
+            fallback: self.fallback.as_ref().map(|fallback| Arc::new(fallback.detached())),
+            tiles: Lru::new(DECODED_TILES),
+        }
+    }
+
     /// La tuile touche une zone de la source.
     fn covers(&self, key: TileKey) -> bool {
         if key.z < self.minzoom {

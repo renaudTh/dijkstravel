@@ -459,12 +459,15 @@ impl Renderer {
         let mut transfer_chunks = BTreeSet::new();
         let mut casters = BTreeSet::new();
         let sunlit = self.input.theme.camera.sunlight > 0.0;
+        // L'altitude du point visé, comme au dessin : sous un point visé haut, la vue plonge plus loin dans les
+        // vallées. Ses tuiles sont déjà là (`camera_tiles`) ; lue à part, une tuile encore absente n'est pas
+        // retenue comme manquante par le relief du dessin.
+        let elevation = self.atlas.elevation().detached();
         for frame in frames {
             let moment = self.animation.moment_at(frame);
             let camera = self.on_screen(self.animation.camera_at(moment));
-            // L'emprise ne dépend pas de l'altitude du point visé : sans la lire, pas de relief encore
-            // absent du cache mis en mémoire comme manquant.
-            let perspective = crate::perspective::Perspective::new(camera, width, height, 0.0, exaggeration);
+            let ground = crate::sight::ground(&elevation, camera, [width, height]);
+            let perspective = crate::perspective::Perspective::new(camera, width, height, ground, exaggeration);
             let seen = terrain.chunks(&self.atlas, &perspective);
             if sunlit {
                 casters.extend(terrain.shadow_casters(&self.atlas, &perspective));
