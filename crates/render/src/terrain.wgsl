@@ -23,6 +23,8 @@ struct Frame {
     light_view_projection: mat4x4<f32>,
     // x : côté d'un pixel de la carte des ombres en repère local ; y : 1 si elle est dessinée.
     shadow: vec4<f32>,
+    // Largeur et hauteur de l'image, en pixels.
+    screen: vec4<f32>,
 };
 
 struct Chunk {
@@ -123,8 +125,11 @@ fn terrain_fragment(in: TerrainOut) -> @location(0) vec4<f32> {
     let distance = length(in.ground - frame.eye.xy);
     let fog = smoothstep(frame.params.x, frame.params.y, distance);
     // La brume s'allume vers le soleil.
+    // La brume s'allume vers le soleil ; tout au fond, elle prend la couleur du ciel derrière le relief : il
+    // s'y fond sans bord, là où il cesse d'être dessiné.
     let toward = vec3<f32>(in.ground - frame.eye.xy, 0.0);
-    let haze = frame.fog_color.rgb + glow(toward);
+    let ndc = vec2<f32>(in.position.x / frame.screen.x * 2.0 - 1.0, 1.0 - in.position.y / frame.screen.y * 2.0);
+    let haze = mix(frame.fog_color.rgb + glow(toward), sky_at(ndc), smoothstep(0.5, 1.0, fog));
     return vec4<f32>(mix(color, haze, fog), 1.0);
 }
 
@@ -146,12 +151,16 @@ fn sky_vertex(@builtin(vertex_index) index: u32) -> SkyOut {
 
 @fragment
 fn sky_fragment(in: SkyOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(sky_at(in.ndc), 1.0);
+}
+
+// Le ciel au point `ndc` de l'écran : la brume à l'horizon, le haut du ciel au-dessus, le halo du soleil.
+fn sky_at(ndc: vec2<f32>) -> vec3<f32> {
     let horizon = frame.params.z;
-    let t = clamp((in.ndc.y - horizon) / max(1.0 - horizon, 1e-3), 0.0, 1.0);
+    let t = clamp((ndc.y - horizon) / max(1.0 - horizon, 1e-3), 0.0, 1.0);
     // Direction du pixel : du plan proche au plan lointain.
-    let near = frame.inverse_view_projection * vec4<f32>(in.ndc, 0.0, 1.0);
-    let far = frame.inverse_view_projection * vec4<f32>(in.ndc, 1.0, 1.0);
+    let near = frame.inverse_view_projection * vec4<f32>(ndc, 0.0, 1.0);
+    let far = frame.inverse_view_projection * vec4<f32>(ndc, 1.0, 1.0);
     let ray = far.xyz / far.w - near.xyz / near.w;
-    let sky = mix(frame.fog_color.rgb + glow(ray), frame.sky_color.rgb + glow(ray) * 0.5, sqrt(t));
-    return vec4<f32>(sky, 1.0);
+    return mix(frame.fog_color.rgb + glow(ray), frame.sky_color.rgb + glow(ray) * 0.5, sqrt(t));
 }

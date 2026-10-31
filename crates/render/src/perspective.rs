@@ -38,8 +38,11 @@ pub struct Perspective {
     z_per_meter: f64,
     /// Distance de la caméra au point visé, en pixels monde.
     distance: f64,
-    /// Plus grande distance au sol dessinée depuis l'aplomb de la caméra, en pixels monde.
+    /// Plus grande distance au sol plat (à l'altitude du point visé) vue depuis l'aplomb de la caméra, en
+    /// pixels monde.
     max_ground: f64,
+    /// `fog`.
+    fog: [f64; 2],
     near: f64,
     far: f64,
     eye: DVec3,
@@ -62,7 +65,9 @@ impl Perspective {
         let half_diagonal = ((FOV_Y / 2.0).tan() * (1.0 + (width / height).powi(2)).sqrt()).atan();
         let top_ray = (pitch + half_diagonal).min(MAX_RAY_ANGLE);
         let max_ground = eye.z * top_ray.tan();
-        let far = (max_ground.hypot(eye.z) + distance) * 1.01;
+        let fog = fog_range(pitch, max_ground);
+        // Jusqu'au bout du brouillard : un relief plus haut que le point visé se voit au-delà du sol plat.
+        let far = (fog[1].hypot(eye.z) + distance) * 1.01;
         let view = view::look_at_mat4(eye, DVec3::ZERO, forward * pitch.cos() + DVec3::Z * pitch.sin());
         let projection = proj::directx::perspective(FOV_Y, width / height, distance * NEAR, far);
         let view_projection = projection * view;
@@ -75,6 +80,7 @@ impl Perspective {
             z_per_meter: exaggeration / meters_per_pixel,
             distance,
             max_ground,
+            fog,
             near: distance * NEAR,
             far,
             eye,
@@ -113,7 +119,8 @@ impl Perspective {
         Some(self.to_lon_lat(hit))
     }
 
-    /// Emprise au sol de l'image : le contour de l'écran projeté sur le sol, coupé à la distance dessinée.
+    /// Emprise au sol de l'image : le contour de l'écran projeté sur le sol, coupé au bout du brouillard (un relief
+    /// plus haut que le point visé se voit au-delà du sol plat).
     /// Sert à choisir les morceaux d'atlas et les tuiles de relief.
     pub fn ground_footprint(&self) -> Vec<LonLat> {
         let (w, h) = (self.width, self.height);
@@ -130,10 +137,11 @@ impl Perspective {
                 let horizontal = direction.truncate();
                 // Le rayon touche le sol devant la caméra et assez près : ce point ; sinon, le plus loin
                 // dessiné dans sa direction (le bord du brouillard).
-                let hit = self.ground_hit(pixel).filter(|hit| (hit.truncate() - eye).length() <= self.max_ground);
+                let reach = self.fog[1];
+                let hit = self.ground_hit(pixel).filter(|hit| (hit.truncate() - eye).length() <= reach);
                 let point = hit.unwrap_or_else(|| {
-                    let reach = if horizontal.length() > 1e-12 { horizontal.normalize() } else { horizontal };
-                    (eye + reach * self.max_ground).extend(0.0)
+                    let along = if horizontal.length() > 1e-12 { horizontal.normalize() } else { horizontal };
+                    (eye + along * reach).extend(0.0)
                 });
                 self.to_lon_lat(point)
             })
@@ -160,11 +168,7 @@ impl Perspective {
     /// Distances au sol (pixels monde) où le brouillard commence et où il recouvre tout : rien à plat,
     /// une brume vers l'horizon quand la caméra le voit.
     pub fn fog(&self) -> [f64; 2] {
-        let reach = self.camera.pitch.to_radians() + FOV_Y / 2.0;
-        let t = ((reach - (MAX_RAY_ANGLE - FOG_RAMP)) / FOG_RAMP).clamp(0.0, 1.0);
-        let t = t * t * (3.0 - 2.0 * t);
-        let lerp = |a: f64, b: f64| a + (b - a) * t;
-        [self.max_ground * lerp(1.2, FOG_START), self.max_ground * lerp(1.5, 1.0)]
+        self.fog
     }
 
     /// Pixel monde, au zoom de la caméra, du point visé.
@@ -246,6 +250,16 @@ impl Projection for Perspective {
     fn camera_zoom(&self) -> f64 {
         self.camera.zoom
     }
+}
+
+/// Distances au sol (pixels monde, depuis l'aplomb de la caméra) où le brouillard commence et où il
+/// recouvre tout : rien à plat, une brume vers l'horizon quand la caméra le voit.
+fn fog_range(pitch: f64, max_ground: f64) -> [f64; 2] {
+    let reach = pitch + FOV_Y / 2.0;
+    let t = ((reach - (MAX_RAY_ANGLE - FOG_RAMP)) / FOG_RAMP).clamp(0.0, 1.0);
+    let t = t * t * (3.0 - 2.0 * t);
+    let lerp = |a: f64, b: f64| a + (b - a) * t;
+    [max_ground * lerp(1.2, FOG_START), max_ground * lerp(1.5, 1.0)]
 }
 
 #[cfg(test)]

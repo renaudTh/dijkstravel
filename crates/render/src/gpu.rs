@@ -144,6 +144,8 @@ struct FrameUniform {
     light_view_projection: [[f32; 4]; 4],
     /// x : côté d'un pixel de la carte des ombres en repère local ; y : 1 si elle est dessinée.
     shadow: [f32; 4],
+    /// Largeur et hauteur de l'image, en pixels.
+    screen: [f32; 4],
 }
 
 #[repr(C)]
@@ -472,6 +474,7 @@ impl Gpu {
             ambient: [light.ambient[0], light.ambient[1], light.ambient[2], light.exposure],
             light_view_projection: settings.shadow.map_or([[0.0; 4]; 4], |(matrix, _)| matrix),
             shadow: [settings.shadow.map_or(0.0, |(_, texel)| texel), f32::from(settings.shadow.is_some()), 0.0, 0.0],
+            screen: [self.width as f32, self.height as f32, 0.0, 0.0],
         };
         let frame_buffer = self.uniform_buffer("image", bytemuck::bytes_of(&frame));
         let shadow_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
