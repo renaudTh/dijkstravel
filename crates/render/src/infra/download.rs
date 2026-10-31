@@ -121,7 +121,8 @@ impl Downloader {
     }
 
     /// Corps de la réponse si elle est bonne ; sinon pourquoi, et si un nouvel essai vaut la peine
-    /// (connexion coupée, trop de requêtes, serveur en erreur) ou non (4xx : hors couverture).
+    /// (connexion coupée, refus passager, serveur en erreur) ou non (404, 410 : hors couverture). L'IGN
+    /// refuse parfois une tuile qui existe d'une autre 4xx : la prendre pour un trou laissait un carré vide.
     fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>, Failure> {
         let mut request = self.agent.get(url);
         for (name, value) in headers {
@@ -131,7 +132,7 @@ impl Downloader {
         let mut response = request.call().map_err(|e| retry(e.to_string()))?;
         let status = response.status().as_u16();
         if !(200..300).contains(&status) {
-            return Err(Failure { retry: status == 429 || status >= 500, reason: format!("HTTP {status}") });
+            return Err(Failure { retry: !matches!(status, 404 | 410), reason: format!("HTTP {status}") });
         }
         response.body_mut().with_config().limit(64 << 20).read_to_vec().map_err(|e| retry(e.to_string()))
     }
