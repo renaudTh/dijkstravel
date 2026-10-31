@@ -8,7 +8,8 @@ use std::sync::{Arc, OnceLock};
 use crate::atlas::{CHUNK, ChunkKey};
 use crate::cache::Lru;
 use crate::elevation::{DIM, Elevation};
-use crate::mercator::{unproject, world_size};
+use crate::geo::LonLat;
+use crate::mercator::{project, unproject, world_size};
 
 /// Cellules de la grille sur le côté d'un morceau : 8 pixels monde chacune.
 pub const GRID: usize = 64;
@@ -71,6 +72,30 @@ impl Meshes {
             }
             Arc::new(vertices)
         })
+    }
+
+    /// Le morceau du niveau `level` qui contient le point.
+    pub fn key_at(&self, point: LonLat, level: u32) -> ChunkKey {
+        let [x, y] = project(point, self.level_zoom(level));
+        let chunk = f64::from(CHUNK);
+        ChunkKey { level, x: (x / chunk).floor() as i64, y: (y / chunk).floor() as i64 }
+    }
+
+    /// Altitude du point sur le maillage du morceau `key`, telle que le GPU la dessine : sur le triangle de
+    /// la grille qui le contient (`indices`), pas sur le relief le plus fin, qui s'en écarte au loin.
+    pub fn altitude_on(&self, key: ChunkKey, point: LonLat) -> f64 {
+        let mesh = self.mesh(key);
+        let chunk = f64::from(CHUNK);
+        let [x, y] = project(point, self.level_zoom(key.level));
+        let cells = GRID as f64;
+        let u = ((x - key.x as f64 * chunk) / chunk * cells).clamp(0.0, cells);
+        let v = ((y - key.y as f64 * chunk) / chunk * cells).clamp(0.0, cells);
+        let (i, j) = ((u.floor() as usize).min(GRID - 1), (v.floor() as usize).min(GRID - 1));
+        let (fx, fy) = (u - i as f64, v - j as f64);
+        let at = |i: usize, j: usize| f64::from(mesh[j * (GRID + 1) + i][2]);
+        let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i, j + 1), at(i + 1, j + 1));
+        // Cellule coupée par la diagonale de (i + 1, j) à (i, j + 1) : triangles a c b et b c d.
+        if fx + fy <= 1.0 { a + (b - a) * fx + (c - a) * fy } else { d + (c - d) * (1.0 - fx) + (b - d) * (1.0 - fy) }
     }
 
     /// Tuiles de relief que lit le maillage d'un morceau, `<source>/<z>/<x>/<y>`.

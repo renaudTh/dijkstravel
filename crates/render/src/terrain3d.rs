@@ -2,7 +2,7 @@
 //! le GPU, et la projection qui pose le tracé, les lieux et les repères sur ce relief en cachant ce qui
 //! passe derrière.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -147,9 +147,28 @@ impl Terrain3d {
         self.gpu.render(&settings, &draws)
     }
 
-    /// La projection du tracé et des lieux sur le relief rendu.
-    pub fn projection<'a>(&'a self, atlas: &Atlas, perspective: &'a Perspective, depth: &'a [f32]) -> OnRelief<'a> {
-        OnRelief { terrain: self, perspective, depth, zoom: self.tile_zoom(atlas, perspective.camera()) }
+    /// La projection du tracé et des lieux sur le relief rendu ; `lift` : demi-largeur du tracé, en pixels de
+    /// l'image, dont il peut dépasser d'une crête pour se voir.
+    pub fn projection<'a>(
+        &'a self,
+        atlas: &Atlas,
+        perspective: &'a Perspective,
+        depth: &'a [f32],
+        lift: f64,
+    ) -> OnRelief<'a> {
+        let chunks: HashSet<ChunkKey> = self.chunks(atlas, perspective).into_iter().collect();
+        let mut levels: Vec<u32> = chunks.iter().map(|key| key.level).collect();
+        levels.sort_unstable();
+        levels.dedup();
+        OnRelief {
+            terrain: self,
+            perspective,
+            depth,
+            zoom: self.tile_zoom(atlas, perspective.camera()),
+            chunks,
+            levels,
+            lift,
+        }
     }
 }
 
@@ -159,18 +178,49 @@ pub struct OnRelief<'a> {
     perspective: &'a Perspective,
     depth: &'a [f32],
     zoom: u8,
+    /// Les morceaux dessinés, et leurs niveaux : un point se pose sur celui qui le contient.
+    chunks: HashSet<ChunkKey>,
+    levels: Vec<u32>,
+    /// Pixels de l'image dont un point peut être caché et rester vu : la demi-largeur du tracé.
+    lift: f64,
+}
+
+impl OnRelief<'_> {
+    /// Altitude du point sur le relief dessiné ; hors des morceaux, sur le relief sous la caméra.
+    fn altitude(&self, point: LonLat) -> f64 {
+        let meshes = &self.terrain.meshes;
+        self.levels
+            .iter()
+            .map(|&level| meshes.key_at(point, level))
+            .find(|key| self.chunks.contains(key))
+            .map_or_else(|| self.terrain.elevation.altitude_at(point, self.zoom), |key| meshes.altitude_on(key, point))
+    }
+
+    /// Le relief cache le pixel `[x, y]` (dans l'image) à la profondeur `depth` ; hors de l'image, rien.
+    fn hidden(&self, [x, y]: [f64; 2], depth: f64) -> bool {
+        let [width, height] = self.perspective.size();
+        if !(x >= 0.0 && y >= 0.0 && x < width && y < height) {
+            return false;
+        }
+        let relief = f64::from(self.depth[y as usize * width as usize + x as usize]);
+        let (relief, own) = (self.perspective.linear_depth(relief), self.perspective.linear_depth(depth));
+        relief < own * (1.0 - OCCLUSION_MARGIN)
+    }
 }
 
 impl Projection for OnRelief<'_> {
     fn screen_point(&self, point: LonLat) -> Option<[f64; 2]> {
-        let altitude = self.terrain.elevation.altitude_at(point, self.zoom);
+        let altitude = self.altitude(point);
         let ([x, y], depth) = self.perspective.screen_at(point, altitude)?;
-        let [width, height] = self.perspective.size();
         // Hors de l'écran, rien à cacher : un trait qui en sort reste entier.
-        if x >= 0.0 && y >= 0.0 && x < width && y < height {
-            let relief = f64::from(self.depth[y as usize * width as usize + x as usize]);
-            let (relief, own) = (self.perspective.linear_depth(relief), self.perspective.linear_depth(depth));
-            if relief < own * (1.0 - OCCLUSION_MARGIN) {
+        if self.hidden([x, y], depth) {
+            // Un tracé qui longe une crête la frôle : testé seul, chaque point s'y montre ou s'y cache au
+            // pixel près, et le trait se hache d'une image à l'autre. Il reste vu tant qu'il en dépasse
+            // d'une demi-largeur, relevée de la hauteur qu'elle couvre à sa distance.
+            let pixels_per_world = self.perspective.distance() / self.perspective.linear_depth(depth);
+            let lift = self.lift / pixels_per_world / self.perspective.z_per_meter();
+            let (raised, raised_depth) = self.perspective.screen_at(point, altitude + lift)?;
+            if self.hidden(raised, raised_depth) {
                 return None;
             }
         }
