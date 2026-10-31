@@ -48,7 +48,8 @@
     "pillTextColor": "#111111",
     "showTitle": true,
     "showCount": false,
-    "showLastStop": true
+    "showLastStop": true,
+    "showProfile": true
   },
   "camera": {
     "followFraction": 0.09,

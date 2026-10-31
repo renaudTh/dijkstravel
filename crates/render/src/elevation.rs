@@ -71,6 +71,24 @@ impl Elevation {
         tiles
     }
 
+    /// Tuiles au zoom `z` que lit `altitude_at` pour ce point (les quatre pixels qui l'entourent).
+    pub fn tiles_at(&self, point: LonLat, z: u8) -> Vec<TileKey> {
+        let [x, y] = project(point, f64::from(z));
+        let scale = DIM as f64 / 512.0;
+        let (px, py) = (x * scale - 0.5, y * scale - 0.5);
+        let (size, dim) = ((DIM as i64) << z, DIM as i64);
+        let mut tiles: Vec<TileKey> = [(0, 0), (1, 0), (0, 1), (1, 1)]
+            .iter()
+            .map(|&(dx, dy)| {
+                let (x, y) = ((px.floor() as i64 + dx).rem_euclid(size), (py.floor() as i64 + dy).clamp(0, size - 1));
+                TileKey { z, x: (x / dim) as u32, y: (y / dim) as u32 }
+            })
+            .collect();
+        tiles.sort();
+        tiles.dedup();
+        tiles
+    }
+
     /// Altitude du sol en mètres, bilinéaire entre les pixels des tuiles au zoom `z`. La mer et ce qui
     /// manque au cache sont au niveau 0 : le relief ne descend pas sous la mer (bathymétrie de Terrarium).
     pub fn altitude_at(&self, point: LonLat, z: u8) -> f64 {

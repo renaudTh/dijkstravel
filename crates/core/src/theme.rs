@@ -117,6 +117,8 @@ pub struct HudTheme {
     pub show_last_stop: bool,
     /// Image du dernier lieu (blason, logo…) quand ses lieux en ont une.
     pub show_image: bool,
+    /// Profil d'altitude du parcours, la part parcourue en couleur : pour une étape.
+    pub show_profile: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -242,6 +244,7 @@ impl Default for Theme {
                 show_count: true,
                 show_last_stop: true,
                 show_image: true,
+                show_profile: false,
             },
             camera: CameraTheme {
                 follow_fraction: 1.0 / 8.0,
@@ -390,6 +393,7 @@ impl Theme {
                 show_count: r.flag("hud.showCount", d.hud.show_count),
                 show_last_stop: r.flag("hud.showLastStop", d.hud.show_last_stop),
                 show_image: r.flag("hud.showImage", d.hud.show_image),
+                show_profile: r.flag("hud.showProfile", d.hud.show_profile),
             },
             camera: CameraTheme {
                 follow_fraction: r.number("camera.followFraction", d.camera.follow_fraction),

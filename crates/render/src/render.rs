@@ -1,7 +1,7 @@
 //! Une image de la vidéo : fond de carte, tracé, lieux, carte d'infos.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Une image rendue, à encoder par `encode`.
 pub use skia_safe::Image;
@@ -9,7 +9,7 @@ use skia_safe::{Canvas, EncodedImageFormat, Rect, Surface, surfaces};
 
 use crate::atlas::Atlas;
 use crate::frame::{Animation, Camera, Moment};
-use crate::hud::{Hud, HudFrame};
+use crate::hud::{Hud, HudFrame, Profile};
 use crate::markers::Markers;
 use crate::mercator::Projection;
 use crate::model::{Input, Tour, Video};
@@ -22,6 +22,9 @@ use crate::terrain3d::Terrain3d;
 const POP_SECONDS: f64 = 0.6;
 /// Part de l'outro au bout de laquelle les noms des lieux ont disparu.
 const LABEL_FADE_PROGRESS: f64 = 0.5;
+/// Points du profil d'altitude, et zoom du relief qu'il lit (≈ 40 m par pixel).
+const PROFILE_SAMPLES: usize = 400;
+const PROFILE_ZOOM: u8 = 11;
 
 /// Ce que la vidéo lit d'un rendu : un run seul (`Renderer`) ou plusieurs à la suite (`Montage`).
 pub trait Frames: Sync {
@@ -57,6 +60,9 @@ pub struct Renderer {
     transfer_atlas: Option<Atlas>,
     /// La vue inclinée en relief (`camera.pitch`), si le GPU le permet.
     terrain: Option<Terrain3d>,
+    /// Profil d'altitude de la carte d'infos (`hud.showProfile`), lu à la première image : ses tuiles
+    /// sont téléchargées avant.
+    profile: OnceLock<Option<Profile>>,
     route: Route,
     stops: Stops,
     markers: Markers,
@@ -130,6 +136,7 @@ impl Renderer {
             atlas,
             transfer_atlas,
             terrain,
+            profile: OnceLock::new(),
             animation,
             fade_labels_at_outro: true,
             tour,
@@ -192,8 +199,46 @@ impl Renderer {
             total: hud.total,
             last_stop: hud.last_stop.as_deref(),
             intro: matches!(moment, Moment::Intro { .. }),
+            profile: self.profile().map(|profile| {
+                let total = self.animation.total_meters();
+                (profile, if total > 0.0 { self.animation.meters_of(moment) / total } else { 0.0 })
+            }),
         };
         self.hud.draw(canvas, &hud_frame);
+    }
+
+    /// Points du tracé où se lit le profil d'altitude.
+    fn profile_points(&self) -> Vec<crate::geo::LonLat> {
+        let total = self.tour.path.total_meters();
+        (0..PROFILE_SAMPLES).map(|i| self.tour.path.point_at(total * i as f64 / (PROFILE_SAMPLES - 1) as f64)).collect()
+    }
+
+    fn profile(&self) -> Option<&Profile> {
+        self.profile
+            .get_or_init(|| {
+                self.input.theme.hud.show_profile.then(|| {
+                    let elevation = self.atlas.elevation();
+                    let zoom = PROFILE_ZOOM.min(elevation.maxzoom);
+                    let altitudes =
+                        self.profile_points().iter().map(|&p| elevation.altitude_at(p, zoom) as f32).collect();
+                    Profile { altitudes }
+                })
+            })
+            .as_ref()
+    }
+
+    /// Tuiles de relief du profil d'altitude, s'il est affiché.
+    fn profile_tiles(&self) -> BTreeSet<String> {
+        if !self.input.theme.hud.show_profile {
+            return BTreeSet::new();
+        }
+        let elevation = self.atlas.elevation();
+        let zoom = PROFILE_ZOOM.min(elevation.maxzoom);
+        self.profile_points()
+            .iter()
+            .flat_map(|&point| elevation.tiles_at(point, zoom))
+            .map(|t| format!("{}/{}/{}/{}", elevation.name, t.z, t.x, t.y))
+            .collect()
     }
 }
 
@@ -209,7 +254,11 @@ impl Frames for Renderer {
     fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String> {
         let (width, height) = (self.input.video.width, self.input.video.height);
         if let Some(terrain) = &self.terrain {
-            return self.needed_tiles_3d(terrain, frames);
+            let mut tiles = self.needed_tiles_3d(terrain, frames);
+            tiles.extend(self.profile_tiles());
+            tiles.sort();
+            tiles.dedup();
+            return tiles;
         }
         let mut chunks = BTreeSet::new();
         let mut transfer_chunks = BTreeSet::new();
@@ -228,6 +277,7 @@ impl Frames for Renderer {
         if let Some(transfer) = &self.transfer_atlas {
             tiles.extend(transfer_chunks.into_iter().flat_map(|chunk| transfer.tiles_of(chunk)));
         }
+        tiles.extend(self.profile_tiles());
         tiles.into_iter().collect()
     }
 

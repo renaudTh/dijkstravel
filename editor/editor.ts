@@ -133,6 +133,7 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'checkbox', path: 'hud.showCount', label: 'Afficher le compteur de lieux' },
       { kind: 'checkbox', path: 'hud.showLastStop', label: 'Afficher le dernier lieu' },
       { kind: 'checkbox', path: 'hud.showImage', label: "Afficher l'image du lieu (blason…)" },
+      { kind: 'checkbox', path: 'hud.showProfile', label: "Afficher le profil d'altitude" },
     ],
   },
   {

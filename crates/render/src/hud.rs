@@ -56,6 +56,27 @@ pub struct HudFrame<'a> {
     pub last_stop: Option<&'a str>,
     /// Pendant l'intro : chiffres et dernier lieu masqués, la carte garde sa taille.
     pub intro: bool,
+    /// Profil d'altitude du parcours (`hud.showProfile`), et la part du tracé parcourue (0 à 1).
+    pub profile: Option<(&'a Profile, f64)>,
+}
+
+/// Altitudes du parcours à intervalles réguliers le long du tracé, en mètres.
+pub struct Profile {
+    pub altitudes: Vec<f32>,
+}
+
+impl Profile {
+    /// Altitude à la part `progress` du tracé (0 à 1), interpolée.
+    fn at(&self, progress: f64) -> f32 {
+        let last = self.altitudes.len().saturating_sub(1);
+        let position = (progress.clamp(0.0, 1.0) * last as f64) as f32;
+        let i = (position.floor() as usize).min(last.saturating_sub(1));
+        let t = position - i as f32;
+        match self.altitudes.get(i + 1) {
+            Some(&next) => self.altitudes[i] + (next - self.altitudes[i]) * t,
+            None => self.altitudes.get(i).copied().unwrap_or(0.0),
+        }
+    }
 }
 
 thread_local! {
@@ -200,8 +221,12 @@ impl Hud {
         let pill_max = inner - if image_shown { image_box + 0.4 * size } else { 0.0 };
         let pill = theme.show_last_stop.then(|| self.pill(frame.last_stop.unwrap_or(""), pill_max));
         let row_height = pill.as_ref().map_or(0.0, |p| p.height).max(if image_shown { image_box } else { 0.0 });
+        let profile_height = 2.2 * size;
 
         let mut height = 2.0 * pad_y + stats_height + gap + row_height;
+        if theme.show_profile && frame.profile.is_some() {
+            height += gap + profile_height;
+        }
         if let Some(title) = &title {
             height += title.height() + gap;
         }
@@ -247,6 +272,10 @@ impl Hud {
             }
             row_x += image_box + 0.4 * size;
         }
+        if let Some((profile, progress)) = frame.profile.filter(|_| theme.show_profile) {
+            let area = Rect::from_xywh(x, y + row_height + gap, inner, profile_height);
+            self.draw_profile(canvas, profile, progress, area);
+        }
         if let (Some(pill), Some(_)) = (pill, frame.last_stop) {
             let top = y + (row_height - pill.height) / 2.0;
             let rect = Rect::from_xywh(row_x, top, pill.width, pill.height);
@@ -262,6 +291,63 @@ impl Hud {
             canvas.draw_rrect(RRect::new_rect_xy(rect, pill.height / 2.0, pill.height / 2.0), &paint);
             pill.text.paint(canvas, (row_x + pill.pad_x, top + pill.pad_y));
         }
+    }
+
+    /// Profil d'altitude dans `area` : tout le parcours en filigrane, la part parcourue dans la couleur
+    /// de la distance, la tête et son altitude.
+    fn draw_profile(&self, canvas: &Canvas, profile: &Profile, progress: f64, area: Rect) {
+        let size = self.theme.size as f32;
+        let label = self.paragraph(
+            &[(
+                &format!("{} m", group_thousands(profile.at(progress).round() as i64)),
+                self.style(0.6 * size, 800, self.colors.text),
+            )],
+            f32::INFINITY,
+            false,
+        );
+        // Place à droite pour l'altitude de la tête.
+        let graph =
+            Rect::from_ltrb(area.left, area.top, area.right - label.max_intrinsic_width() - 0.4 * size, area.bottom);
+        let (low, high) = profile.altitudes.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &a| (lo.min(a), hi.max(a)));
+        // Au moins 300 m d'écart : une étape plate le reste à l'écran.
+        let span = (high - low).max(300.0);
+        let floor = low - span * 0.1;
+        let point = |t: f32, altitude: f32| {
+            Point::new(
+                graph.left + t * graph.width(),
+                graph.bottom - (altitude - floor) / (span * 1.1) * graph.height(),
+            )
+        };
+        let count = profile.altitudes.len().max(2);
+        let area_path = |until: f32| {
+            let mut path = skia_safe::PathBuilder::new();
+            path.move_to((graph.left, graph.bottom));
+            for (i, &altitude) in profile.altitudes.iter().enumerate() {
+                let t = i as f32 / (count - 1) as f32;
+                if t > until {
+                    path.line_to(point(until, profile.at(f64::from(until))));
+                    break;
+                }
+                path.line_to(point(t, altitude));
+            }
+            path.line_to((graph.left + until * graph.width(), graph.bottom));
+            path.close();
+            path.detach()
+        };
+        let mut paint = Paint::default();
+        paint.set_anti_alias(true);
+        paint.set_color(self.colors.text.with_a(56));
+        canvas.draw_path(&area_path(1.0), &paint);
+        let progress = progress.clamp(0.0, 1.0) as f32;
+        paint.set_color(self.colors.distance);
+        canvas.draw_path(&area_path(progress), &paint);
+        let head = point(progress, profile.at(f64::from(progress)));
+        paint.set_color(self.colors.text);
+        canvas.draw_circle(head, 0.18 * size, &paint);
+        label.paint(
+            canvas,
+            (area.right - label.max_intrinsic_width(), area.top + (area.height() - label.height()) / 2.0),
+        );
     }
 
     /// Pastille du dernier lieu : `fitOnOneLine` de `page.ts`, puis points de suspension.
