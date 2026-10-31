@@ -103,6 +103,8 @@ pub struct ImagerySource {
 pub struct TileSource {
     pub name: String,
     pub maxzoom: u8,
+    /// Relief : en deçà, aucune tuile n'est demandée, la source qui comble sert seule.
+    pub minzoom: u8,
     /// Zones couvertes, `[ouest, sud, est, nord]` en degrés : aucune tuile n'est demandée hors d'elles.
     /// Vide : le monde entier.
     pub bounds: Vec<[f64; 4]>,

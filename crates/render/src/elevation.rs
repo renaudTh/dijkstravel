@@ -25,6 +25,8 @@ const VOID_BELOW: f32 = -12_000.0;
 pub struct Elevation {
     pub name: String,
     pub maxzoom: u8,
+    /// En deçà, la source qui comble sert seule.
+    minzoom: u8,
     dir: PathBuf,
     /// Zones couvertes, `[ouest, sud, est, nord]` en degrés ; vide : le monde entier.
     bounds: Vec<[f64; 4]>,
@@ -38,6 +40,7 @@ impl Elevation {
         Elevation {
             name: name.to_owned(),
             maxzoom,
+            minzoom: 0,
             dir: PathBuf::from(cache_dir).join(name),
             bounds: Vec::new(),
             fallback: None,
@@ -48,6 +51,7 @@ impl Elevation {
     /// La source, et celle qui la comble, de proche en proche.
     pub fn of(cache_dir: &str, source: &TileSource) -> Self {
         Elevation {
+            minzoom: source.minzoom,
             bounds: source.bounds.clone(),
             fallback: source.fallback.as_ref().map(|fallback| Arc::new(Elevation::of(cache_dir, fallback))),
             ..Elevation::new(cache_dir, &source.name, source.maxzoom)
@@ -56,6 +60,9 @@ impl Elevation {
 
     /// La tuile touche une zone de la source.
     fn covers(&self, key: TileKey) -> bool {
+        if key.z < self.minzoom {
+            return false;
+        }
         if self.bounds.is_empty() {
             return true;
         }
@@ -284,10 +291,12 @@ mod tests {
 
     /// L'IGN au zoom 14 en métropole, comblé par Terrarium au zoom 13.
     fn ign_over_terrarium(dir: &std::path::Path) -> Elevation {
-        let terrarium = TileSource { name: "terrarium".into(), maxzoom: 13, bounds: Vec::new(), fallback: None };
+        let terrarium =
+            TileSource { name: "terrarium".into(), maxzoom: 13, minzoom: 0, bounds: Vec::new(), fallback: None };
         let ign = TileSource {
             name: "ign-alti".into(),
             maxzoom: 14,
+            minzoom: 7,
             bounds: vec![[-5.5, 41.2, 9.8, 51.2]],
             fallback: Some(Box::new(terrarium)),
         };
@@ -307,6 +316,9 @@ mod tests {
         assert!(names.contains("terrarium/13/4232/2936") && names.contains("terrarium/13/4233/2937"), "{names:?}");
         let portugal = TileKey { z: 14, x: 7783, y: 6193 };
         assert!(!elevation.tile_names(&[portugal]).iter().any(|name| name.starts_with("ign-alti")));
+        // Vue de loin, au-dessus de la France : Terrarium seul.
+        let far = TileKey { z: 5, x: 16, y: 11 };
+        assert!(!elevation.tile_names(&[far]).iter().any(|name| name.starts_with("ign-alti")));
         // Trou de l'IGN : l'altitude de Terrarium.
         let filled = elevation.tile(alps).unwrap();
         assert!(filled[DIM * 10 + 10] > 1799.0 && filled[DIM * 10 + 10] < 1801.0, "{}", filled[DIM * 10 + 10]);

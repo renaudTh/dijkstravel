@@ -70,11 +70,22 @@ const IMAGERIES: [Imagery; 3] = [
 /// partout où l'IGN n'a rien.
 const TERRAIN: (&str, &str, u8) =
     ("terrarium", "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", 14);
-/// Relief de l'IGN (RGE ALTI, 1 à 5 m, licence ouverte Etalab 2.0), France et outre-mer : servi en WMS
-/// à la taille et dans la projection de nos tuiles, en altitudes flottantes, -99999 hors couverture. Il
-/// est rangé au cache en Terrarium, ses trous en vides que Terrarium comble.
+/// Relief de l'IGN (RGE ALTI, 1 à 5 m, licence ouverte Etalab 2.0), France et outre-mer : servi en WMS,
+/// en altitudes flottantes, -99999 hors couverture. Il est rangé au cache en Terrarium, ses trous en
+/// vides que Terrarium comble.
 const IGN_TERRAIN: (&str, u8) = ("ign-alti", 15);
-const IGN_TERRAIN_WMS: &str = "https://data.geopf.fr/wms-r/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256&FORMAT=image/x-bil;bits=32&BBOX=";
+const IGN_TERRAIN_WMS: &str = "https://data.geopf.fr/wms-r/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES&STYLES=&CRS=EPSG:4326&FORMAT=image/x-bil;bits=32";
+/// Pas des grilles d'où l'IGN sert son relief, en degrés : sa pyramide WGS84G, du niveau 6 au niveau 14
+/// (environ 4,8 m en latitude), le pas divisé par deux à chaque niveau. Demandé dans une autre grille,
+/// il y est repris au plus proche voisin, et en Web Mercator une rangée sur trois ou quatre se répète,
+/// des marches qui rayent les versants à l'ombrage. Demandé sur la grille du niveau qui a la finesse de
+/// la tuile (le zoom moins un), il est interpolé ici ; sur une plus fine, l'image dépasserait ce que le
+/// service accepte de servir.
+fn ign_terrain_step(z: u32) -> f64 {
+    360.0 / f64::from(1u32 << (z.clamp(u32::from(IGN_TERRAIN_MINZOOM), 15) + 8))
+}
+/// Le zoom du niveau 6, le plus grossier de la pyramide : en deçà, Terrarium.
+const IGN_TERRAIN_MINZOOM: u8 = 7;
 /// La métropole et la Corse, puis la Guadeloupe, la Martinique, la Guyane, La Réunion, Mayotte et
 /// Saint-Pierre-et-Miquelon, larges : `[ouest, sud, est, nord]`.
 const IGN_TERRAIN_BOUNDS: [[f64; 4]; 7] = [
@@ -98,17 +109,19 @@ pub fn imagery_source(name: &str) -> ImagerySource {
 
 /// Le relief de l'IGN, comblé par Terrarium.
 pub fn terrain_source() -> TileSource {
-    let terrarium = TileSource { name: TERRAIN.0.to_owned(), maxzoom: TERRAIN.2, bounds: Vec::new(), fallback: None };
+    let terrarium =
+        TileSource { name: TERRAIN.0.to_owned(), maxzoom: TERRAIN.2, minzoom: 0, bounds: Vec::new(), fallback: None };
     TileSource {
         name: IGN_TERRAIN.0.to_owned(),
         maxzoom: IGN_TERRAIN.1,
+        minzoom: IGN_TERRAIN_MINZOOM,
         bounds: IGN_TERRAIN_BOUNDS.to_vec(),
         fallback: Some(Box::new(terrarium)),
     }
 }
 
 pub fn vector_source() -> TileSource {
-    TileSource { name: VECTOR.0.to_owned(), maxzoom: VECTOR.2, bounds: Vec::new(), fallback: None }
+    TileSource { name: VECTOR.0.to_owned(), maxzoom: VECTOR.2, minzoom: 0, bounds: Vec::new(), fallback: None }
 }
 
 /// Images des lieux dans le cache.
@@ -269,9 +282,9 @@ impl Downloader {
         let [source, z, x, y] = parts.as_slice() else { return Err(format!("Tuile mal formée : {tile}")) };
         if *source == IGN_TERRAIN.0 {
             let parse = |value: &str| value.parse::<u32>().map_err(|_| format!("Tuile mal formée : {tile}"));
-            let url = format!("{IGN_TERRAIN_WMS}{}", mercator_bbox(parse(z)?, parse(x)?, parse(y)?));
-            return match self.get_with_retries(&url, false) {
-                Ok(Some(body)) => write_atomically(&dir.join(tile), &terrarium_png(&body)?).map(Ok),
+            let grid = IgnGrid::around(parse(z)?, parse(x)?, parse(y)?);
+            return match self.get_with_retries(&grid.url(), false) {
+                Ok(Some(body)) => write_atomically(&dir.join(tile), &terrarium_png(&grid.resample(&body)?)?).map(Ok),
                 Ok(None) => Ok(Ok(())),
                 Err(reason) => Ok(Err(reason)),
             };
@@ -362,29 +375,90 @@ impl Downloader {
     }
 }
 
-/// Écrite à côté puis renommée : un rendu concurrent ne lit jamais un fichier à moitié écrit. Le nom
-/// provisoire porte le processus et un compteur : deux rendus d'un même serveur ne s'y croisent pas.
-/// `ouest,sud,est,nord` de la tuile `z/x/y`, en mètres Web Mercator (EPSG:3857).
-fn mercator_bbox(z: u32, x: u32, y: u32) -> String {
-    const HALF: f64 = 20_037_508.342_789_244;
-    let side = 2.0 * HALF / f64::from(1u32 << z);
-    let (west, north) = (-HALF + f64::from(x) * side, HALF - f64::from(y) * side);
-    format!("{west},{},{},{north}", north - side, west + side)
+/// Le morceau de la grille de l'IGN qui couvre la tuile Web Mercator `z/x/y`, d'une case de marge.
+struct IgnGrid {
+    z: u32,
+    x: u32,
+    y: u32,
+    /// Première colonne et première rangée, depuis -180° et 90°.
+    column: i64,
+    row: i64,
+    columns: usize,
+    rows: usize,
 }
 
-/// Altitudes BIL (256 × 256 flottants 32 bits petit-boutistes) en PNG Terrarium : (R × 256 + G + B / 256)
-/// − 32768 m, au 1/256 m près. Hors couverture (-99999), le vide de Terrarium (0, 0, 0).
-fn terrarium_png(bil: &[u8]) -> Result<Vec<u8>, String> {
-    const SIDE: usize = 256;
-    if bil.len() != SIDE * SIDE * 4 {
-        let start = String::from_utf8_lossy(&bil[..bil.len().min(200)]).into_owned();
-        return Err(format!("relief IGN : {} octets au lieu de {} ({start})", bil.len(), SIDE * SIDE * 4));
+impl IgnGrid {
+    fn around(z: u32, x: u32, y: u32) -> Self {
+        let n = f64::from(1u32 << z);
+        let lon = |x: u32| f64::from(x) / n * 360.0 - 180.0;
+        let lat = |y: u32| (std::f64::consts::PI * (1.0 - 2.0 * f64::from(y) / n)).sinh().atan().to_degrees();
+        let step = ign_terrain_step(z);
+        let column = ((lon(x) + 180.0) / step).floor() as i64 - 1;
+        let row = ((90.0 - lat(y)) / step).floor() as i64 - 1;
+        let last_column = ((lon(x + 1) + 180.0) / step).ceil() as i64 + 1;
+        let last_row = ((90.0 - lat(y + 1)) / step).ceil() as i64 + 1;
+        Self { z, x, y, column, row, columns: (last_column - column) as usize, rows: (last_row - row) as usize }
     }
+
+    /// WMS 1.3.0 en EPSG:4326 : `sud,ouest,nord,est`, latitude d'abord.
+    fn url(&self) -> String {
+        let step = ign_terrain_step(self.z);
+        let west = self.column as f64 * step - 180.0;
+        let north = 90.0 - self.row as f64 * step;
+        let east = west + self.columns as f64 * step;
+        let south = north - self.rows as f64 * step;
+        format!("{IGN_TERRAIN_WMS}&WIDTH={}&HEIGHT={}&BBOX={south},{west},{north},{east}", self.columns, self.rows)
+    }
+
+    /// Les altitudes BIL (flottants 32 bits petit-boutistes) de la grille, interpolées au centre de
+    /// chaque pixel de la tuile, 256 × 256 ; vide (NaN) dès qu'une des quatre cases voisines l'est.
+    fn resample(&self, bil: &[u8]) -> Result<Vec<f32>, String> {
+        let expected = self.columns * self.rows * 4;
+        if bil.len() != expected {
+            let start = String::from_utf8_lossy(&bil[..bil.len().min(200)]).into_owned();
+            return Err(format!("relief IGN : {} octets au lieu de {expected} ({start})", bil.len()));
+        }
+        let cells: Vec<f32> = bil
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|value| f32::from_le_bytes(*value))
+            .map(|altitude| if altitude.is_finite() && altitude > -1000.0 { altitude } else { f32::NAN })
+            .collect();
+        let at = |column: usize, row: usize| {
+            f64::from(cells[row.min(self.rows - 1) * self.columns + column.min(self.columns - 1)])
+        };
+        let n = f64::from(1u32 << self.z) * 256.0;
+        let step = ign_terrain_step(self.z);
+        let mut altitudes = Vec::with_capacity(256 * 256);
+        for py in 0..256u32 {
+            let lat = (std::f64::consts::PI * (1.0 - 2.0 * (f64::from(self.y * 256 + py) + 0.5) / n))
+                .sinh()
+                .atan()
+                .to_degrees();
+            let row = (90.0 - lat) / step - self.row as f64 - 0.5;
+            let (r, fr) = (row.floor().max(0.0) as usize, row - row.floor());
+            for px in 0..256u32 {
+                let lon = (f64::from(self.x * 256 + px) + 0.5) / n * 360.0 - 180.0;
+                let column = (lon + 180.0) / step - self.column as f64 - 0.5;
+                let (c, fc) = (column.floor().max(0.0) as usize, column - column.floor());
+                let top = at(c, r) * (1.0 - fc) + at(c + 1, r) * fc;
+                let bottom = at(c, r + 1) * (1.0 - fc) + at(c + 1, r + 1) * fc;
+                altitudes.push((top * (1.0 - fr) + bottom * fr) as f32);
+            }
+        }
+        Ok(altitudes)
+    }
+}
+
+/// Altitudes 256 × 256 en PNG Terrarium : (R × 256 + G + B / 256) − 32768 m, au 1/256 m près. Les vides
+/// (NaN), le vide de Terrarium (0, 0, 0).
+fn terrarium_png(altitudes: &[f32]) -> Result<Vec<u8>, String> {
+    const SIDE: usize = 256;
     let mut pixels = Vec::with_capacity(SIDE * SIDE * 4);
-    for value in bil.as_chunks::<4>().0 {
-        let altitude = f64::from(f32::from_le_bytes(*value));
-        let encoded =
-            if altitude.is_finite() && altitude > -1000.0 { (altitude + 32768.0).clamp(0.0, 65535.996) } else { 0.0 };
+    for &altitude in altitudes {
+        let altitude = f64::from(altitude);
+        let encoded = if altitude.is_finite() { (altitude + 32768.0).clamp(0.0, 65535.996) } else { 0.0 };
         let whole = encoded.floor();
         pixels.extend_from_slice(&[
             (whole / 256.0) as u8,
@@ -405,6 +479,8 @@ fn terrarium_png(bil: &[u8]) -> Result<Vec<u8>, String> {
     Ok(png.as_bytes().to_vec())
 }
 
+/// Écrite à côté puis renommée : un rendu concurrent ne lit jamais un fichier à moitié écrit. Le nom
+/// provisoire porte le processus et un compteur : deux rendus d'un même serveur ne s'y croisent pas.
 fn write_atomically(file: &Path, body: &[u8]) -> Result<(), String> {
     static PARTS: AtomicUsize = AtomicUsize::new(0);
     if let Some(dir) = file.parent() {
@@ -421,22 +497,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn asks_the_ign_for_our_tile_in_web_mercator() {
-        assert_eq!(
-            mercator_bbox(0, 0, 0),
-            "-20037508.342789244,-20037508.342789244,20037508.342789244,20037508.342789244"
-        );
-        assert_eq!(mercator_bbox(1, 1, 0), "0,0,20037508.342789244,20037508.342789244");
+    fn asks_the_ign_on_its_own_grid_around_our_tile() {
+        let grid = IgnGrid::around(15, 16963, 11785);
+        assert_eq!((grid.columns, grid.rows), (258, 184));
+        let url = grid.url();
+        assert!(url.contains("&WIDTH=258&HEIGHT=184&BBOX="), "{url}");
+        let bbox: Vec<f64> = url.rsplit("BBOX=").next().unwrap().split(',').map(|v| v.parse().unwrap()).collect();
+        for value in [bbox[1] + 180.0, 90.0 - bbox[2]] {
+            let cells = value / ign_terrain_step(15);
+            assert!((cells - cells.round()).abs() < 1e-6, "bord hors de la grille : {cells}");
+        }
+        // Loin, sur une grille plus grossière : une image que le service accepte.
+        for z in [7, 10, 15] {
+            let grid = IgnGrid::around(z, 0, 0);
+            assert!(grid.columns <= 300 && grid.rows <= 300, "z{z} : {} × {}", grid.columns, grid.rows);
+        }
+        assert_eq!(IgnGrid::around(10, 527, 367).columns, 258);
     }
 
     #[test]
-    fn stores_ign_altitudes_as_terrarium_with_voids_outside_coverage() {
-        let mut bil = Vec::new();
-        for i in 0..256 * 256 {
-            let altitude: f32 = if i == 0 { -99999.0 } else { 2454.5 };
-            bil.extend_from_slice(&altitude.to_le_bytes());
-        }
-        let png = terrarium_png(&bil).unwrap();
+    fn interpolates_every_row_of_our_tile_and_spreads_voids() {
+        let grid = IgnGrid::around(15, 16963, 11785);
+        // L'altitude monte d'un mètre par rangée vers le sud, puis une case vide au milieu.
+        let mut cells: Vec<f32> = (0..grid.rows).flat_map(|row| vec![row as f32; grid.columns]).collect();
+        cells[grid.rows / 2 * grid.columns + grid.columns / 2] = -99999.0;
+        let bil: Vec<u8> = cells.iter().flat_map(|cell| cell.to_le_bytes()).collect();
+        let altitudes = grid.resample(&bil).unwrap();
+        let column: Vec<f32> = (0..256).map(|py| altitudes[py * 256]).collect();
+        assert!(column.windows(2).all(|pair| pair[1] > pair[0]), "aucune rangée répétée");
+        let voids = altitudes.iter().filter(|altitude| altitude.is_nan()).count();
+        assert!((1..=9).contains(&voids), "{voids} vides");
+        assert!(grid.resample(b"<ExceptionReport/>").is_err());
+    }
+
+    #[test]
+    fn stores_altitudes_as_terrarium_with_voids() {
+        let altitudes: Vec<f32> = (0..256 * 256).map(|i| if i == 0 { f32::NAN } else { 2454.5 }).collect();
+        let png = terrarium_png(&altitudes).unwrap();
         let image = skia_safe::Image::from_encoded(skia_safe::Data::new_copy(&png)).unwrap();
         let info =
             skia_safe::ImageInfo::new((256, 256), skia_safe::ColorType::RGBA8888, skia_safe::AlphaType::Unpremul, None);
@@ -445,7 +542,6 @@ mod tests {
         let altitude = |p: &[u8]| f64::from(p[0]) * 256.0 + f64::from(p[1]) + f64::from(p[2]) / 256.0 - 32768.0;
         assert_eq!(altitude(&pixels[0..4]), -32768.0, "vide de Terrarium");
         assert_eq!(altitude(&pixels[4..8]), 2454.5);
-        assert!(terrarium_png(b"<ExceptionReport/>").is_err());
     }
 
     #[test]
