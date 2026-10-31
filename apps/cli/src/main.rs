@@ -75,6 +75,10 @@ enum Command {
         /// Hauteur de la vidéo en pixels, avec `--width`.
         #[arg(long, requires = "width")]
         height: Option<u32>,
+        /// Images par seconde, à la place de `fps` du run (60 : mouvement plus fluide, surtout en 4K) ;
+        /// écrit `video-<n>fps.mp4`.
+        #[arg(long)]
+        fps: Option<u32>,
     },
     /// Légende prête à coller (`publication.txt`) et couverture (`cover.jpg`) du run.
     Publication { run: PathBuf },
@@ -107,6 +111,9 @@ enum Command {
         width: Option<u32>,
         #[arg(long, requires = "width")]
         height: Option<u32>,
+        /// Envoie la variante rendue avec `render --fps n`.
+        #[arg(long)]
+        fps: Option<u32>,
     },
     /// Éditeur du thème du run, sur sa tournée déjà calculée, dans le navigateur.
     Editor { run: PathBuf },
@@ -136,19 +143,38 @@ fn main() -> ExitCode {
             zoom,
             width,
             height,
+            fps,
         } => render::main(
             &run,
             seconds,
-            render::Variant { duration, stop_slowdown, no_slowdown, relief, zoom, no_hud, size: width.zip(height) },
+            render::Variant {
+                duration,
+                stop_slowdown,
+                no_slowdown,
+                relief,
+                zoom,
+                no_hud,
+                size: width.zip(height),
+                fps,
+            },
             threads,
             frame,
         ),
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
-        Command::Upload { run, duration, stop_slowdown, no_slowdown, relief, zoom, no_hud, width, height } => {
+        Command::Upload { run, duration, stop_slowdown, no_slowdown, relief, zoom, no_hud, width, height, fps } => {
             upload::main(
                 &run,
-                render::Variant { duration, stop_slowdown, no_slowdown, relief, zoom, no_hud, size: width.zip(height) },
+                render::Variant {
+                    duration,
+                    stop_slowdown,
+                    no_slowdown,
+                    relief,
+                    zoom,
+                    no_hud,
+                    size: width.zip(height),
+                    fps,
+                },
             )
         }
         Command::Editor { run } => editor::main(&run),

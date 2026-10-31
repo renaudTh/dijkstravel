@@ -2,7 +2,8 @@
 //! partir du seul `tour.json`. Tout ce que lit le moteur est téléchargé avant, dans `data/cache/`.
 //! La vue est à plat ; `--3d` la rend en relief, caméra inclinée et un peu plus serrée, dans `video-3d.mp4`.
 //! `--zoom n` rapproche la caméra du parcours n fois (`video-zoom-<n>.mp4`) ; `--no-hud` la rend sans la
-//! carte d'infos (`video-sans-carte.mp4`) ; `--width l --height h` en l × h pixels (`video-<l>x<h>.mp4`). `--duration n` rend une variante de n secondes de trajet, dans
+//! carte d'infos (`video-sans-carte.mp4`) ; `--width l --height h` en l × h pixels (`video-<l>x<h>.mp4`) ;
+//! `--fps n` à n images par seconde (`video-<n>fps.mp4`). `--duration n` rend une variante de n secondes de trajet, dans
 //! `video-<n>s.mp4` ; `--stop-slowdown n` une variante qui freine autant aux lieux, dans
 //! `video-ralenti-<n>.mp4`. Un dossier qui contient
 //! `montage.json` se rend comme un montage (`montage.rs`).
@@ -30,12 +31,15 @@ pub fn scene(arg: &Path) -> Outcome<(Scene, RunPaths)> {
     scene_variant(arg, Variant::default())
 }
 
-/// La durée du trajet (`durationSec`) et la taille de la variante à la place de celles du run ; l'intro et
+/// La durée du trajet (`durationSec`), la cadence (`fps`) et la taille de la variante à la place de celles du run ; l'intro et
 /// la fin ne changent pas.
 fn scene_variant(arg: &Path, variant: Variant) -> Outcome<(Scene, RunPaths)> {
     let (mut run, paths) = load::run(arg)?;
     if let Some(duration) = variant.duration {
         run.video.duration_sec = duration;
+    }
+    if let Some(fps) = variant.fps {
+        run.video.fps = fps;
     }
     let mut scene = scene_of(run, &paths, arg)?;
     if let Some((width, height)) = variant.size {
@@ -77,6 +81,8 @@ pub struct Variant {
     pub no_hud: bool,
     /// Largeur et hauteur en pixels, à la place du format du run.
     pub size: Option<(u32, u32)>,
+    /// Images par seconde, à la place de `fps` du run.
+    pub fps: Option<u32>,
     /// Multiplie `camera.zoom` du thème : la caméra du parcours se rapproche d'autant, son lissage ne change pas.
     pub zoom: Option<f64>,
 }
@@ -91,6 +97,7 @@ impl Variant {
         let zoom = self.zoom.map(|zoom| format!(" --zoom {zoom}"));
         let hud = if self.no_hud { " --no-hud" } else { "" };
         let size = self.size.map(|(width, height)| format!(" --width {width} --height {height}"));
+        let fps = self.fps.map(|fps| format!(" --fps {fps}"));
         duration.unwrap_or_default()
             + &slowdown.unwrap_or_default()
             + none
@@ -98,6 +105,7 @@ impl Variant {
             + &zoom.unwrap_or_default()
             + hud
             + &size.unwrap_or_default()
+            + &fps.unwrap_or_default()
     }
 
     /// Le thème avec les réglages forcés.
@@ -117,12 +125,13 @@ impl Variant {
         theme.camera.zoom *= self.zoom.unwrap_or(1.0) * if self.relief { RELIEF_ZOOM } else { 1.0 };
     }
 
-    /// Suffixe d'une image seule (`--frame`) : relief, zoom et taille ; sans carte, elle garde son nom.
+    /// Suffixe d'une image seule (`--frame`) : relief, zoom, taille et cadence (l'image n n'est pas au même
+    /// instant) ; sans carte, elle garde son nom.
     fn frame_suffix(&self) -> String {
-        Variant { relief: self.relief, zoom: self.zoom, size: self.size, ..Variant::default() }.suffix()
+        Variant { relief: self.relief, zoom: self.zoom, size: self.size, fps: self.fps, ..Variant::default() }.suffix()
     }
 
-    /// Suffixe des fichiers rendus, `-60s-ralenti-2-3d-zoom-1.5-sans-carte-1080x1080`.
+    /// Suffixe des fichiers rendus, `-60s-ralenti-2-3d-zoom-1.5-sans-carte-1080x1080-60fps`.
     fn suffix(&self) -> String {
         let duration = self.duration.map(|duration| format!("-{duration}s"));
         let slowdown = self.stop_slowdown.map(|slowdown| format!("-ralenti-{slowdown}"));
@@ -131,6 +140,7 @@ impl Variant {
         let zoom = self.zoom.map(|zoom| format!("-zoom-{zoom}"));
         let hud = if self.no_hud { "-sans-carte" } else { "" };
         let size = self.size.map(|(width, height)| format!("-{width}x{height}"));
+        let fps = self.fps.map(|fps| format!("-{fps}fps"));
         duration.unwrap_or_default()
             + &slowdown.unwrap_or_default()
             + none
@@ -138,6 +148,7 @@ impl Variant {
             + &zoom.unwrap_or_default()
             + hud
             + &size.unwrap_or_default()
+            + &fps.unwrap_or_default()
     }
 }
 
@@ -176,6 +187,9 @@ pub fn main(arg: &Path, seconds: Option<f64>, variant: Variant, threads: Option<
     if variant.size.is_some_and(|(width, height)| !side(width) || !side(height)) {
         return fail("--width et --height attendent des entiers pairs de 16 à 7680 (H.264 en 4:2:0)");
     }
+    if variant.fps.is_some_and(|fps| !(1..=120).contains(&fps)) {
+        return fail("--fps attend un entier de 1 à 120");
+    }
     if montage::is_montage(arg) {
         if variant.duration.is_some()
             || variant.stop_slowdown.is_some()
@@ -183,9 +197,10 @@ pub fn main(arg: &Path, seconds: Option<f64>, variant: Variant, threads: Option<
             || variant.relief
             || variant.zoom.is_some()
             || variant.size.is_some()
+            || variant.fps.is_some()
         {
             return fail(
-                "--duration, --stop-slowdown, --no-slowdown, --3d, --zoom, --width et --height ne s'appliquent pas à un montage : régler chaque segment et son thème",
+                "--duration, --stop-slowdown, --no-slowdown, --3d, --zoom, --width, --height et --fps ne s'appliquent pas à un montage : régler chaque segment et son thème",
             );
         }
         return montage::render(arg, seconds, threads, frame, !variant.no_hud);

@@ -1,7 +1,7 @@
 //! `dijkstravel upload runs/<nom>` : envoie la vidéo, la couverture et `publication.txt` du run ou du
 //! montage dans `Documents/dijkstravel/<nom>/` du Nextcloud décrit dans `.env` (fichiers déjà présents
 //! remplacés).
-//! `--duration n`, `--stop-slowdown n`, `--no-slowdown`, `--3d`, `--zoom n`, `--no-hud` et `--width l --height h` envoient la
+//! `--duration n`, `--stop-slowdown n`, `--no-slowdown`, `--3d`, `--zoom n`, `--no-hud`, `--width l --height h` et `--fps n` envoient la
 //! variante rendue avec les mêmes options à la place de `video.mp4`.
 
 use std::path::{Path, PathBuf};
