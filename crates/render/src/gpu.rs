@@ -23,10 +23,10 @@ const MESHES: usize = 768;
 /// Échantillons par pixel de l'image : crêtes lisses contre le ciel. La profondeur relue vient d'une
 /// seconde passe à un échantillon, un tampon multi-échantillonné ne se relisant pas.
 const SAMPLES: u32 = 4;
-/// Mémoire du GPU au plus pour les jeux de surfaces de rendu, et leur nombre au plus : plusieurs images
-/// se rendent à la fois, le GPU dessine l'une pendant que les threads relisent les autres.
-const TARGETS_BUDGET: u64 = 1 << 30;
-const MAX_TARGETS: u64 = 3;
+/// Mémoire au plus pour les tampons de relecture, et leur nombre au plus : chaque image en cours de
+/// relecture a les siens, pendant que le GPU dessine les suivantes.
+const READBACK_BUDGET: u64 = 1 << 29;
+const MAX_READBACKS: u64 = 8;
 /// Niveaux de mipmap au plus : contre le fourmillement des morceaux lointains vus en rasant.
 const MIP_LEVELS: u32 = 6;
 
@@ -72,10 +72,20 @@ pub struct ChunkDraw<'a> {
     pub transfer_image: &'a dyn Fn() -> Option<Image>,
 }
 
-/// L'image rendue et sa profondeur (0 au plan proche, 1 au lointain ou dans le ciel), ligne par ligne.
+/// L'image rendue et sa profondeur (0 au plan proche, 1 au lointain ou dans le ciel), ligne par ligne,
+/// à `depth_size` : la même vue, en moins de pixels pour une grande image (`depth_size`).
 pub struct Rendered {
     pub image: Image,
     pub depth: Vec<f32>,
+    pub depth_size: [u32; 2],
+}
+
+/// Taille de la profondeur relue d'une image : petit côté de 1080 pixels au plus, la résolution du
+/// rendu de référence. Elle ne sert qu'à cacher le tracé derrière le relief ; plus fine, sa relecture
+/// coûterait autant que celle de l'image.
+pub fn depth_size(width: u32, height: u32) -> [u32; 2] {
+    let factor = (width.min(height) / 1080).max(1);
+    [width.div_ceil(factor), height.div_ceil(factor)]
 }
 
 #[repr(C)]
@@ -114,21 +124,28 @@ pub struct Gpu {
     chunk_stride: u64,
     textures: Lru<u64, Option<Arc<wgpu::TextureView>>>,
     meshes: Lru<u64, Arc<wgpu::Buffer>>,
-    /// Jeux de surfaces de rendu, chacun pris par une image à la fois.
-    targets: Vec<Mutex<Targets>>,
-    /// Jeu à essayer en premier, à tour de rôle.
-    next_targets: AtomicUsize,
+    /// Surfaces de rendu, prises le temps d'enregistrer et de soumettre une image : le GPU exécute les
+    /// soumissions dans l'ordre, la suivante peut les reprendre aussitôt.
+    targets: Mutex<Targets>,
+    /// Tampons de relecture, chacun pris par une image jusqu'à ce qu'elle soit relue.
+    readbacks: Vec<Mutex<Readback>>,
+    /// Tampons à essayer en premier, à tour de rôle.
+    next_readback: AtomicUsize,
 }
 
-/// Ce qui ne sert qu'à un passage à la fois.
+/// Les surfaces d'un passage.
 struct Targets {
     /// L'image multi-échantillonnée, résolue dans `color`.
     samples: wgpu::Texture,
     samples_depth: wgpu::Texture,
     color: wgpu::Texture,
     depth: wgpu::Texture,
-    color_readback: wgpu::Buffer,
-    depth_readback: wgpu::Buffer,
+}
+
+/// L'image et sa profondeur copiées pour être relues.
+struct Readback {
+    color: wgpu::Buffer,
+    depth: wgpu::Buffer,
 }
 
 impl Gpu {
@@ -289,8 +306,9 @@ impl Gpu {
         queue.write_buffer(&indices, 0, bytemuck::cast_slice(index_data));
         let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment);
         let chunk_stride = (size_of::<ChunkUniform>() as u64).div_ceil(alignment) * alignment;
-        let count = (TARGETS_BUDGET / Targets::bytes(width, height)).clamp(1, MAX_TARGETS);
-        let targets = (0..count).map(|_| Mutex::new(Targets::new(&device, width, height))).collect();
+        let count = (READBACK_BUDGET / Readback::bytes(width, height)).clamp(1, MAX_READBACKS);
+        let readbacks = (0..count).map(|_| Mutex::new(Readback::new(&device, width, height))).collect();
+        let targets = Mutex::new(Targets::new(&device, width, height));
         Ok(Gpu {
             width,
             height,
@@ -307,7 +325,8 @@ impl Gpu {
             textures: Lru::new(TEXTURES),
             meshes: Lru::new(MESHES),
             targets,
-            next_targets: AtomicUsize::new(0),
+            readbacks,
+            next_readback: AtomicUsize::new(0),
             device,
             queue,
         })
@@ -375,7 +394,8 @@ impl Gpu {
             })
             .collect();
 
-        let targets = self.free_targets();
+        let readback = self.free_readback();
+        let targets = self.targets.lock().unwrap();
         let color_view = targets.color.create_view(&Default::default());
         let depth_view = targets.depth.create_view(&Default::default());
         let samples_view = targets.samples.create_view(&Default::default());
@@ -444,11 +464,11 @@ impl Gpu {
             }
         }
         let (width, height) = (self.width, self.height);
+        let [depth_width, depth_height] = depth_size(width, height);
         let row = padded_row(width);
-        let extent = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
-        for (texture, buffer, aspect) in [
-            (&targets.color, &targets.color_readback, wgpu::TextureAspect::All),
-            (&targets.depth, &targets.depth_readback, wgpu::TextureAspect::DepthOnly),
+        for (texture, buffer, aspect, [w, h]) in [
+            (&targets.color, &readback.color, wgpu::TextureAspect::All, [width, height]),
+            (&targets.depth, &readback.depth, wgpu::TextureAspect::DepthOnly, [depth_width, depth_height]),
         ] {
             encoder.copy_texture_to_buffer(
                 wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect },
@@ -456,46 +476,47 @@ impl Gpu {
                     buffer,
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
-                        bytes_per_row: Some(row),
-                        rows_per_image: Some(height),
+                        bytes_per_row: Some(padded_row(w)),
+                        rows_per_image: Some(h),
                     },
                 },
-                extent,
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             );
         }
         let submission = self.queue.submit([encoder.finish()]);
-        for buffer in [&targets.color_readback, &targets.depth_readback] {
+        drop(targets);
+        for buffer in [&readback.color, &readback.depth] {
             buffer.map_async(wgpu::MapMode::Read, .., |result| result.expect("relecture du relief"));
         }
         // Cette image seulement : les autres threads soumettent les leurs pendant ce temps.
         device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: None }).expect("GPU du relief");
-        let (row, tight) = (row as usize, width as usize * 4);
+        let row = row as usize;
         // Une seule copie par tampon : l'image garde ses lignes alignées, la profondeur est relue en
         // flottants, sans passer par des octets intermédiaires.
-        let mapped = targets.color_readback.get_mapped_range(..).expect("relecture du relief");
+        let mapped = readback.color.get_mapped_range(..).expect("relecture du relief");
         let pixels = skia_safe::Data::new_copy(&mapped[..row * height as usize]);
         drop(mapped);
-        targets.color_readback.unmap();
-        let mapped = targets.depth_readback.get_mapped_range(..).expect("relecture du relief");
-        let mut depth: Vec<f32> = Vec::with_capacity(width as usize * height as usize);
-        for line in mapped.chunks(row) {
-            depth.extend_from_slice(bytemuck::cast_slice(&line[..tight]));
+        readback.color.unmap();
+        let mapped = readback.depth.get_mapped_range(..).expect("relecture du relief");
+        let mut depth: Vec<f32> = Vec::with_capacity(depth_width as usize * depth_height as usize);
+        for line in mapped.chunks(padded_row(depth_width) as usize).take(depth_height as usize) {
+            depth.extend_from_slice(bytemuck::cast_slice(&line[..depth_width as usize * 4]));
         }
         drop(mapped);
-        targets.depth_readback.unmap();
-        drop(targets);
+        readback.depth.unmap();
+        drop(readback);
         let info = ImageInfo::new((width as i32, height as i32), ColorType::RGBA8888, AlphaType::Premul, None);
         let image = skia_safe::images::raster_from_data(&info, pixels, row).expect("image du relief");
-        Rendered { image, depth }
+        Rendered { image, depth, depth_size: [depth_width, depth_height] }
     }
 
-    /// Un jeu de surfaces libre, sinon le suivant à tour de rôle dès qu'il se libère.
-    fn free_targets(&self) -> std::sync::MutexGuard<'_, Targets> {
-        let count = self.targets.len();
-        let start = self.next_targets.fetch_add(1, Ordering::Relaxed);
+    /// Des tampons de relecture libres, sinon les suivants à tour de rôle dès qu'ils se libèrent.
+    fn free_readback(&self) -> std::sync::MutexGuard<'_, Readback> {
+        let count = self.readbacks.len();
+        let start = self.next_readback.fetch_add(1, Ordering::Relaxed);
         (0..count)
-            .find_map(|i| self.targets[(start + i) % count].try_lock().ok())
-            .unwrap_or_else(|| self.targets[start % count].lock().unwrap())
+            .find_map(|i| self.readbacks[(start + i) % count].try_lock().ok())
+            .unwrap_or_else(|| self.readbacks[start % count].lock().unwrap())
     }
 
     fn uniform_buffer(&self, label: &str, data: &[u8]) -> wgpu::Buffer {
@@ -582,15 +603,38 @@ impl Gpu {
     }
 }
 
-impl Targets {
-    /// Mémoire d'un jeu : image et profondeur multi-échantillonnées, résolues, et leurs relectures.
+impl Readback {
+    /// Octets d'un tampon de `width × height` pixels de 4 octets, lignes alignées.
+    fn size(width: u32, height: u32) -> u64 {
+        u64::from(padded_row(width)) * u64::from(height)
+    }
+
+    /// Mémoire des deux tampons.
     fn bytes(width: u32, height: u32) -> u64 {
-        let pixels = u64::from(width) * u64::from(height);
-        pixels * 4 * (2 * u64::from(SAMPLES) + 2) + 2 * u64::from(padded_row(width)) * u64::from(height)
+        let [depth_width, depth_height] = depth_size(width, height);
+        Self::size(width, height) + Self::size(depth_width, depth_height)
     }
 
     fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
-        let target = |label: &str, format: wgpu::TextureFormat, sample_count: u32| {
+        let buffer = |label: &str, size: u64| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let [depth_width, depth_height] = depth_size(width, height);
+        Readback {
+            color: buffer("image relue", Self::size(width, height)),
+            depth: buffer("profondeur relue", Self::size(depth_width, depth_height)),
+        }
+    }
+}
+
+impl Targets {
+    fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let sized = |[width, height]: [u32; 2], label: &str, format: wgpu::TextureFormat, sample_count: u32| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
                 size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -602,21 +646,13 @@ impl Targets {
                 view_formats: &[],
             })
         };
-        let readback = |label: &str| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size: u64::from(padded_row(width)) * u64::from(height),
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
-        };
+        let target = |label: &str, format, sample_count| sized([width, height], label, format, sample_count);
         Targets {
             samples: target("échantillons", COLOR_FORMAT, SAMPLES),
             samples_depth: target("profondeur des échantillons", DEPTH_FORMAT, SAMPLES),
             color: target("image", COLOR_FORMAT, 1),
-            depth: target("profondeur", DEPTH_FORMAT, 1),
-            color_readback: readback("image relue"),
-            depth_readback: readback("profondeur relue"),
+            // La passe de profondeur se rend à sa propre taille : même vue, moins de pixels.
+            depth: sized(depth_size(width, height), "profondeur", DEPTH_FORMAT, 1),
         }
     }
 }
@@ -729,7 +765,7 @@ mod tests {
         let pixel = |x: i32, y: i32| rendered.image.peek_pixels().unwrap().get_color((x, y));
         assert_eq!(pixel(135, 240), Color::RED);
         assert_eq!(pixel(135, 0), Color::BLUE);
-        let depth = |x: usize, y: usize| rendered.depth[y * width as usize + x];
+        let depth = |x: usize, y: usize| rendered.depth[y * rendered.depth_size[0] as usize + x];
         assert!(depth(135, 240) < 1.0 && depth(135, 0) == 1.0);
         // Même profondeur que celle que calcule `Perspective` pour le point visé.
         let (_, expected) = perspective.screen_at([6.0, 45.0], 0.0).unwrap();

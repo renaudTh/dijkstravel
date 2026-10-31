@@ -154,6 +154,7 @@ impl Terrain3d {
         atlas: &Atlas,
         perspective: &'a Perspective,
         depth: &'a [f32],
+        depth_size: [u32; 2],
         lift: f64,
     ) -> OnRelief<'a> {
         let chunks: HashSet<ChunkKey> = self.chunks(atlas, perspective).into_iter().collect();
@@ -168,6 +169,7 @@ impl Terrain3d {
             chunks,
             levels,
             lift,
+            depth_size,
         }
     }
 }
@@ -183,6 +185,8 @@ pub struct OnRelief<'a> {
     levels: Vec<u32>,
     /// Pixels de l'image dont un point peut être caché et rester vu : la demi-largeur du tracé.
     lift: f64,
+    /// Taille de `depth`, plus petite que l'image pour une grande image.
+    depth_size: [u32; 2],
 }
 
 impl OnRelief<'_> {
@@ -202,7 +206,9 @@ impl OnRelief<'_> {
         if !(x >= 0.0 && y >= 0.0 && x < width && y < height) {
             return false;
         }
-        let relief = f64::from(self.depth[y as usize * width as usize + x as usize]);
+        let [depth_width, depth_height] = self.depth_size;
+        let (dx, dy) = ((x * f64::from(depth_width) / width) as usize, (y * f64::from(depth_height) / height) as usize);
+        let relief = f64::from(self.depth[dy.min(depth_height as usize - 1) * depth_width as usize + dx]);
         let (relief, own) = (self.perspective.linear_depth(relief), self.perspective.linear_depth(depth));
         relief < own * (1.0 - OCCLUSION_MARGIN)
     }

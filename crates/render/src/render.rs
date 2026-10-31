@@ -382,7 +382,7 @@ impl Frames for Renderer {
             let rendered = terrain.render(&self.atlas, transfer, &perspective);
             canvas.draw_image(&rendered.image, (0, 0), None);
             let lift = self.input.theme.route.width / 2.0 * self.input.video.scale();
-            let projection = terrain.projection(&self.atlas, &perspective, &rendered.depth, lift);
+            let projection = terrain.projection(&self.atlas, &perspective, &rendered.depth, rendered.depth_size, lift);
             self.draw_overlays(canvas, &projection, frame, with_hud);
             return;
         }
