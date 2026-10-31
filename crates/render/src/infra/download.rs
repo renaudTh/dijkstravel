@@ -66,9 +66,10 @@ const IMAGERIES: [Imagery; 3] = [
     },
 ];
 
-/// Relief (Mapzen Terrain Tiles, encodage Terrarium), d'où vient l'ombrage du fond.
+/// Relief (Mapzen Terrain Tiles, encodage Terrarium), d'où viennent l'ombrage du fond (zoom 12 au plus)
+/// et le relief de la vue inclinée.
 const TERRAIN: (&str, &str, u8) =
-    ("terrarium", "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", 12);
+    ("terrarium", "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", 14);
 /// Tuiles vectorielles OpenFreeMap (schéma OpenMapTiles), dont seules les frontières sont tirées. Leur
 /// adresse change à chaque mise à jour de la carte : elle se lit dans le TileJSON.
 const VECTOR: (&str, &str, u8) = ("openmaptiles", "https://tiles.openfreemap.org/planet", 14);

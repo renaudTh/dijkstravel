@@ -3,18 +3,19 @@
 //! `hillshade`). Calculé une fois par morceau d'atlas, au lieu d'une passe plein écran par image.
 
 use std::f32::consts::{FRAC_PI_2, PI};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use rayon::prelude::*;
 use skia_safe::{AlphaType, ColorType, Data, Image, ImageInfo};
 
 use crate::cache::Lru;
+use crate::elevation::{DIM, Elevation};
 use crate::mercator::{unproject, world_size};
 use crate::tiles::TileKey;
 
-/// Côté d'une tuile Terrarium, en pixels.
-const DIM: usize = 256;
+/// Zoom de relief le plus fin de l'ombrage, celui de l'ancien rendu MapLibre : au-delà, seule la vue
+/// inclinée lit des tuiles plus fines.
+const MAXZOOM: u8 = 12;
 /// Grille préparée : la tuile et une bordure d'un pixel prise sur ses voisines.
 const PREPARED: usize = DIM + 2;
 /// `u_log2_world_width` de MapLibre pour Web Mercator.
@@ -31,20 +32,13 @@ type Prepared = Vec<[u8; 2]>;
 pub struct Hillshade {
     exaggeration: f64,
     maxzoom: u8,
-    dir: PathBuf,
-    elevations: Lru<TileKey, Option<Arc<Vec<f32>>>>,
+    elevation: Arc<Elevation>,
     prepared: Lru<TileKey, Option<Arc<Prepared>>>,
 }
 
 impl Hillshade {
-    pub fn new(cache_dir: &str, name: &str, maxzoom: u8, exaggeration: f64) -> Self {
-        Hillshade {
-            exaggeration,
-            maxzoom,
-            dir: PathBuf::from(cache_dir).join(name),
-            elevations: Lru::new(256),
-            prepared: Lru::new(256),
-        }
+    pub fn new(elevation: Arc<Elevation>, exaggeration: f64) -> Self {
+        Hillshade { exaggeration, maxzoom: elevation.maxzoom.min(MAXZOOM), elevation, prepared: Lru::new(256) }
     }
 
     pub fn enabled(&self) -> bool {
@@ -59,39 +53,11 @@ impl Hillshade {
     /// Tuiles de relief lues pour couvrir `[x0, x1[ × [y0, y1[` (pixels monde au zoom `level_zoom`),
     /// voisines comprises : la bordure de chaque tuile est prise sur elles.
     pub fn tiles_for(&self, level_zoom: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<TileKey> {
-        let z = self.tile_zoom(level_zoom);
-        let tile = world_size(level_zoom) / f64::from(1u32 << z);
-        let count = 1i64 << z;
-        let mut tiles = Vec::new();
-        let ys = ((y0 / tile).floor() as i64 - 1).max(0)..=((y1 / tile).ceil() as i64).min(count - 1);
-        for y in ys {
-            for x in (x0 / tile).floor() as i64 - 1..=(x1 / tile).ceil() as i64 {
-                tiles.push(TileKey { z, x: x.rem_euclid(count) as u32, y: y as u32 });
-            }
-        }
-        tiles
+        self.elevation.tiles_covering(self.tile_zoom(level_zoom), level_zoom, [x0, y0, x1, y1], 1)
     }
 
     fn elevations(&self, key: TileKey) -> Option<Arc<Vec<f32>>> {
-        self.elevations.get_or_insert_with(&key, || {
-            let file = self.dir.join(key.z.to_string()).join(key.x.to_string()).join(key.y.to_string());
-            let image = Image::from_encoded(Data::new_copy(&std::fs::read(file).ok()?))?;
-            let info = ImageInfo::new((DIM as i32, DIM as i32), ColorType::RGBA8888, AlphaType::Unpremul, None);
-            let mut pixels = vec![0u8; DIM * DIM * 4];
-            if image.width() as usize != DIM
-                || !image.read_pixels(&info, &mut pixels, DIM * 4, (0, 0), skia_safe::image::CachingHint::Disallow)
-            {
-                return None;
-            }
-            // Terrarium : (R × 256 + G + B / 256) − 32768 mètres.
-            let decoded = pixels
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|p| f32::from(p[0]) * 256.0 + f32::from(p[1]) + f32::from(p[2]) / 256.0 - 32768.0)
-                .collect();
-            Some(Arc::new(decoded))
-        })
+        self.elevation.tile(key)
     }
 
     fn prepared(&self, key: TileKey) -> Option<Arc<Prepared>> {

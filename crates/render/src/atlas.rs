@@ -3,6 +3,7 @@
 //! est fixe : la plupart des images ne font que translater les mêmes morceaux.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use skia_safe::{
     Canvas, Color, ColorFilter, FilterMode, Image, MipmapMode, Paint, Rect, SamplingOptions, canvas::SrcRectConstraint,
@@ -12,13 +13,14 @@ use skia_safe::{
 use crate::borders::Borders;
 use crate::cache::Lru;
 use crate::color::parse_color;
+use crate::elevation::Elevation;
 use crate::frame::Camera;
 use crate::hillshade::Hillshade;
 use crate::mercator::{View, world_size};
 use crate::model::{BasemapTheme, ImagerySource, Input, TileSource};
 use crate::tiles::{DEFAULT_SEA_SHARE, TileKey, TileStore};
 
-const CHUNK: i32 = 512;
+pub const CHUNK: i32 = 512;
 /// Bordure dessinée en plus autour d'un morceau : le filtrage bilinéaire lit les pixels voisins.
 const APRON: i32 = 2;
 /// Morceaux gardés : 1 Mo chacun.
@@ -39,6 +41,8 @@ pub struct Atlas {
     imagery: TileStore,
     sea_imagery: Option<TileStore>,
     hillshade: Hillshade,
+    /// Altitudes du relief, partagées avec la vue inclinée.
+    elevation: Arc<Elevation>,
     borders: Option<Borders>,
     adjust: ColorFilter,
     tint: Color,
@@ -56,6 +60,7 @@ impl Atlas {
     pub fn new(travel_zoom: f64, input: &Input) -> Self {
         let basemap = &input.theme.basemap;
         let (dir, terrain, vector) = (&input.tile_dir, &input.terrain, &input.vector);
+        let elevation = Arc::new(Elevation::new(dir, &terrain.name, terrain.maxzoom));
         Atlas {
             depends_on: (
                 travel_zoom.to_bits(),
@@ -74,7 +79,8 @@ impl Atlas {
                 .sea_imagery
                 .as_ref()
                 .map(|sea| TileStore::new(dir, &sea.name, sea.maxzoom).sea_share(None)),
-            hillshade: Hillshade::new(dir, &terrain.name, terrain.maxzoom, basemap.hillshade),
+            hillshade: Hillshade::new(elevation.clone(), basemap.hillshade),
+            elevation,
             borders: basemap
                 .borders
                 .then(|| Borders::new(dir, &vector.name, vector.maxzoom, parse_color(&basemap.border_color))),
@@ -96,7 +102,11 @@ impl Atlas {
             && *dir == input.tile_dir
     }
 
-    fn level_zoom(&self, level: u32) -> f64 {
+    pub fn elevation(&self) -> Arc<Elevation> {
+        self.elevation.clone()
+    }
+
+    pub fn level_zoom(&self, level: u32) -> f64 {
         self.travel_zoom - f64::from(level)
     }
 
