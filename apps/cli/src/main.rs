@@ -68,9 +68,10 @@ enum Command {
         /// de `--3d` ; écrit `video-zoom-<n>.mp4`.
         #[arg(long)]
         zoom: Option<f64>,
-        /// Avec `--3d`, relief éclairé par le soleil, de la position a à la position b de sa course du jour
-        /// pendant la vidéo : 0 à son lever à l'est, 90 à midi, 180 à son coucher à l'ouest (`--sun 20,140` :
-        /// du matin à la fin d'après-midi ; `--sun 150,178` : coucher de soleil) ; écrit
+        /// Avec `--3d`, relief éclairé par le soleil, de la position a à la position b de sa course pendant la
+        /// vidéo : 0 à son lever à l'est, 90 à midi, 180 à son coucher à l'ouest, 270 à minuit sous la pleine
+        /// lune, 360 au lever suivant (`--sun 20,140` : du matin à la fin d'après-midi ; `--sun 150,178` :
+        /// coucher de soleil ; `--sun 170,230` : la nuit qui tombe ; `--sun 300,359` : l'aube) ; écrit
         /// `video-3d-soleil-<a>-<b>.mp4`.
         #[arg(long, value_name = "A,B", value_parser = angles)]
         sun: Option<(f64, f64)>,

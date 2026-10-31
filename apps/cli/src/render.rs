@@ -84,7 +84,7 @@ pub struct Variant {
     pub size: Option<(u32, u32)>,
     /// Images par seconde, à la place de `fps` du run.
     pub fps: Option<u32>,
-    /// Relief éclairé par le soleil (`camera.sunlight` à 1), de cette position sur sa course du jour à
+    /// Relief éclairé par le soleil (`camera.sunlight` à 1), de cette position sur sa course à
     /// celle-ci (`camera.sunFrom`, `camera.sunTo`), avec `--3d`.
     pub sun: Option<(f64, f64)>,
     /// Multiplie `camera.zoom` du thème : la caméra du parcours se rapproche d'autant, son lissage ne change pas.
@@ -214,8 +214,10 @@ pub fn main(arg: &Path, seconds: Option<f64>, variant: Variant, threads: Option<
     if variant.sun.is_some() && !variant.relief {
         return fail("--sun éclaire le relief : il va avec --3d");
     }
-    if variant.sun.is_some_and(|(from, to)| ![from, to].iter().all(|angle| (1.0..=179.0).contains(angle))) {
-        return fail("--sun attend deux angles de 1 à 179 (0 : lever, 90 : midi, 180 : coucher), --sun 20,140");
+    if variant.sun.is_some_and(|(from, to)| ![from, to].iter().all(|angle| (1.0..=359.0).contains(angle))) {
+        return fail(
+            "--sun attend deux angles de 1 à 359 (0 : lever, 90 : midi, 180 : coucher, 270 : minuit), --sun 20,140",
+        );
     }
     if montage::is_montage(arg) {
         if variant.duration.is_some()

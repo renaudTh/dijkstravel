@@ -25,6 +25,12 @@ struct Frame {
     shadow: vec4<f32>,
     // Largeur et hauteur de l'image, en pixels.
     screen: vec4<f32>,
+    // xyz : vers le soleil, même couché.
+    glow_direction: vec4<f32>,
+    // rgb : lueur du soleil dans la brume et le ciel.
+    glow_color: vec4<f32>,
+    // x : nuit dans les couleurs (pâles et bleuies) ; y : étoiles.
+    night: vec4<f32>,
 };
 
 struct Chunk {
@@ -101,20 +107,59 @@ fn sunlit_share(local: vec3<f32>, normal: vec3<f32>) -> f32 {
     return select(mix(1.0, lit, inside), 1.0, outside);
 }
 
-// La couleur de l'atlas éclairée par le soleil (selon la pente, hors de l'ombre des crêtes) et par le ciel
-// (selon l'ouverture).
+// La couleur de l'atlas éclairée par le soleil ou la lune (selon la pente, hors de l'ombre des crêtes) et
+// par le ciel (selon l'ouverture). La nuit, elle pâlit et bleuit, comme vue par l'œil dans le noir.
 fn sunlit(color: vec3<f32>, slope: vec2<f32>, local: vec3<f32>) -> vec3<f32> {
     let normal = normalize(vec3<f32>(-slope * frame.sun_color.w, 1.0));
     let facing = max(dot(normal, frame.sun.xyz), 0.0);
     let direct = frame.sun_color.rgb * facing * sunlit_share(local, normal);
     let sky = frame.ambient.rgb * (0.6 + 0.4 * normal.z);
-    return mix(color, color * (direct + sky) * frame.ambient.w, frame.sun.w);
+    let lit = color * (direct + sky) * frame.ambient.w;
+    let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let night = mix(lit, luma * vec3<f32>(0.82, 0.92, 1.18), frame.night.x * 0.45);
+    return mix(color, night, frame.sun.w);
 }
 
-// Lumière du soleil diffusée vers la caméra dans la direction `ray` : un halo autour de lui.
+// Lumière du soleil diffusée vers la caméra dans la direction `ray` : un halo autour de lui, qui
+// s'attarde au-dessus de l'horizon après son coucher.
 fn glow(ray: vec3<f32>) -> vec3<f32> {
-    let facing = max(dot(normalize(ray), frame.sun.xyz), 0.0);
-    return frame.sun_color.rgb * (0.35 * pow(facing, 4.0) + 0.5 * pow(facing, 40.0)) * frame.sun.w;
+    let facing = max(dot(normalize(ray), frame.glow_direction.xyz), 0.0);
+    return frame.glow_color.rgb * (0.35 * pow(facing, 4.0) + 0.5 * pow(facing, 40.0)) * frame.sun.w;
+}
+
+// Nombre pseudo-aléatoire de 0 à 1 d'une case (hash12 de Dave Hoskins).
+fn hash(p: vec2<f32>) -> f32 {
+    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+// Étoiles fixes au ciel, dans la direction `ray` : une par case d'une grille en latitude et longitude
+// célestes (cases de même aire), au plus ; `pixel` : angle d'un pixel, pour qu'elles ne scintillent pas en
+// bougeant.
+fn stars(ray: vec3<f32>, pixel: f32) -> vec3<f32> {
+    let d = normalize(ray);
+    let cell = 0.006;
+    let latitude = asin(clamp(d.z, -1.0, 1.0));
+    let row = floor(latitude / cell);
+    let columns = max(floor(6.2831853 * cos((row + 0.5) * cell) / cell), 1.0);
+    let longitude = atan2(d.y, d.x) + 3.14159265;
+    let column = floor(longitude / 6.2831853 * columns);
+    let seed = vec2<f32>(row, column);
+    if hash(seed) > 0.06 {
+        return vec3<f32>(0.0);
+    }
+    // L'étoile, quelque part dans sa case.
+    let star_latitude = (row + 0.2 + 0.6 * hash(seed + 17.0)) * cell;
+    let star_longitude = (column + 0.2 + 0.6 * hash(seed + 31.0)) / columns * 6.2831853 - 3.14159265;
+    let star = vec3<f32>(cos(star_latitude) * cos(star_longitude), cos(star_latitude) * sin(star_longitude), sin(star_latitude));
+    // Angle par la corde : précis pour les petits angles, là où acos ne l'est pas en 32 bits.
+    let angle = length(d - star);
+    let size = pixel * 0.8;
+    let brightness = pow(hash(seed + 53.0), 5.0) * 1.6 + 0.3;
+    let warmth = hash(seed + 71.0);
+    let tint = mix(vec3<f32>(0.75, 0.85, 1.0), vec3<f32>(1.0, 0.92, 0.8), warmth);
+    return tint * brightness * exp(-(angle * angle) / (size * size));
 }
 
 @fragment
@@ -149,9 +194,24 @@ fn sky_vertex(@builtin(vertex_index) index: u32) -> SkyOut {
     return out;
 }
 
+// Le ciel, étoilé la nuit au-dessus de la brume de l'horizon : jamais sur le relief, qui s'y fond.
 @fragment
 fn sky_fragment(in: SkyOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(sky_at(in.ndc), 1.0);
+    let sky = sky_at(in.ndc);
+    let horizon = frame.params.z;
+    let t = clamp((in.ndc.y - horizon) / max(1.0 - horizon, 1e-3), 0.0, 1.0);
+    if frame.night.y <= 0.0 || t <= 0.0 {
+        return vec4<f32>(sky, 1.0);
+    }
+    // Direction du pixel et angle d'un pixel : entre ce rayon et celui du pixel au-dessus.
+    let near = frame.inverse_view_projection * vec4<f32>(in.ndc, 0.0, 1.0);
+    let far = frame.inverse_view_projection * vec4<f32>(in.ndc, 1.0, 1.0);
+    let above = frame.inverse_view_projection * vec4<f32>(in.ndc + vec2<f32>(0.0, 2.0 / frame.screen.y), 1.0, 1.0);
+    let ray = normalize(far.xyz / far.w - near.xyz / near.w);
+    let next = normalize(above.xyz / above.w - near.xyz / near.w);
+    let pixel = max(length(ray - next), 1e-5);
+    let shine = stars(ray, pixel) * frame.night.y * smoothstep(0.0, 0.3, t) * frame.sun.w;
+    return vec4<f32>(sky + shine, 1.0);
 }
 
 // Le ciel au point `ndc` de l'écran : la brume à l'horizon, le haut du ciel au-dessus, le halo du soleil.

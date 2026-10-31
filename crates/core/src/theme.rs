@@ -151,9 +151,9 @@ pub struct CameraTheme {
     /// versant s'éclaire selon qu'il lui fait face, sa lumière rougit quand il est bas, le ciel et la brume
     /// se teintent vers lui.
     pub sunlight: f64,
-    /// Position du soleil sur sa course du jour au début et à la fin de la vidéo, en degrés : 0 à son lever
-    /// à l'est, 90 au plus haut au sud, 180 à son coucher à l'ouest (sa vraie course à la latitude du
-    /// parcours).
+    /// Position du soleil sur sa course au début et à la fin de la vidéo, en degrés : 0 à son lever à l'est,
+    /// 90 au plus haut au sud, 180 à son coucher à l'ouest, 270 à minuit (la nuit, sous la pleine lune), 360
+    /// au lever suivant (sa vraie course à la latitude du parcours).
     pub sun_from: f64,
     pub sun_to: f64,
 }
@@ -196,8 +196,8 @@ pub const NUMBER_RANGES: [(&str, f64, f64); 28] = [
     ("camera.headingWindow", 0.2, 4.0),
     ("camera.terrainExaggeration", 1.0, 3.0),
     ("camera.sunlight", 0.0, 1.0),
-    ("camera.sunFrom", 1.0, 179.0),
-    ("camera.sunTo", 1.0, 179.0),
+    ("camera.sunFrom", 1.0, 359.0),
+    ("camera.sunTo", 1.0, 359.0),
 ];
 
 impl Default for Theme {

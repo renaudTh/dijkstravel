@@ -22,9 +22,9 @@ pub(crate) const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8U
 /// ligne à ligne sans conversion.
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-/// Textures de morceaux gardées en mémoire vidéo : 1,4 Mo chacune avec leurs mipmaps, 700 Mo en tout. Une
-/// image en 4K en lit deux cents environ, le double en transfert.
-const TEXTURES: usize = 512;
+/// Textures de morceaux gardées en mémoire vidéo : 1,4 Mo chacune avec leurs mipmaps, 1 Go en tout. Une
+/// image en 4K d'un relief doux en lit plus de 512 : moins, elles seraient recomposées à chaque image.
+const TEXTURES: usize = 768;
 /// Maillages gardés en mémoire vidéo : 50 Ko chacun.
 const MESHES: usize = 768;
 /// Échantillons par pixel de l'image : crêtes lisses contre le ciel. La profondeur relue vient d'une
@@ -85,6 +85,12 @@ pub struct Light {
     pub ambient: [f32; 3],
     /// Gain sur le relief éclairé : le soleil couchant reste lisible.
     pub exposure: f32,
+    /// Vers le soleil, même couché, et couleur de sa lueur dans la brume et le ciel.
+    pub glow_direction: [f32; 3],
+    pub glow: [f32; 3],
+    /// Part de la nuit dans les couleurs (pâles et bleuies) et dans les étoiles, de 0 à 1.
+    pub night: f32,
+    pub stars: f32,
 }
 
 /// Un morceau d'atlas à dessiner.
@@ -147,6 +153,12 @@ struct FrameUniform {
     shadow: [f32; 4],
     /// Largeur et hauteur de l'image, en pixels.
     screen: [f32; 4],
+    /// xyz : vers le soleil, même couché ; w : 0.
+    glow_direction: [f32; 4],
+    /// rgb : lueur du soleil ; w : 0.
+    glow: [f32; 4],
+    /// x : nuit dans les couleurs ; y : étoiles.
+    night: [f32; 4],
 }
 
 #[repr(C)]
@@ -476,6 +488,9 @@ impl Gpu {
             light_view_projection: settings.shadow.map_or([[0.0; 4]; 4], |(matrix, _)| matrix),
             shadow: [settings.shadow.map_or(0.0, |(_, texel)| texel), f32::from(settings.shadow.is_some()), 0.0, 0.0],
             screen: [self.width as f32, self.height as f32, 0.0, 0.0],
+            glow_direction: [light.glow_direction[0], light.glow_direction[1], light.glow_direction[2], 0.0],
+            glow: [light.glow[0], light.glow[1], light.glow[2], 0.0],
+            night: [light.night, light.stars, 0.0, 0.0],
         };
         let frame_buffer = self.uniform_buffer("image", bytemuck::bytes_of(&frame));
         let shadow_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
