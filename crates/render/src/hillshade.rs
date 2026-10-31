@@ -17,7 +17,7 @@ use crate::tiles::TileKey;
 /// inclinée lit des tuiles plus fines.
 const MAXZOOM: u8 = 12;
 /// Grille préparée : la tuile et une bordure d'un pixel prise sur ses voisines.
-const PREPARED: usize = DIM + 2;
+pub const PREPARED: usize = DIM + 2;
 /// `u_log2_world_width` de MapLibre pour Web Mercator.
 const LOG2_WORLD_WIDTH: f64 = 25.2562;
 /// Couleurs d'ombre et de lumière de l'ancien rendu MapLibre, accent noir par défaut.
@@ -33,7 +33,19 @@ const SAMPLES_PER_DEM_PIXEL: f64 = 2.0;
 const MAX_STEP: usize = 8;
 
 /// Pentes quantifiées sur 8 bits par canal, comme la texture que remplit `hillshadePrepare`.
-type Prepared = Vec<[u8; 2]>;
+pub type Prepared = Vec<[u8; 2]>;
+
+/// Une tuile de relief posée dans une zone, pour un ombrage calculé sur le GPU à partir de ses pentes.
+pub struct ShadeTile<'a> {
+    pub key: TileKey,
+    /// Gauche, haut, largeur, hauteur en pixels de la zone.
+    pub rect: [f32; 4],
+    /// Latitudes des bords haut et bas de la tuile, en degrés : le shader les interpole comme `render`.
+    pub latitudes: [f32; 2],
+    /// Pentes préparées (`PREPARED × PREPARED`, bordure comprise), lues seulement si le GPU ne les a pas
+    /// déjà ; aucune sans relief.
+    pub slopes: Box<dyn Fn() -> Option<Arc<Prepared>> + 'a>,
+}
 
 pub struct Hillshade {
     exaggeration: f64,
@@ -60,6 +72,42 @@ impl Hillshade {
     /// voisines comprises : la bordure de chaque tuile est prise sur elles.
     pub fn tiles_for(&self, level_zoom: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<TileKey> {
         self.elevation.tiles_covering(self.tile_zoom(level_zoom), level_zoom, [x0, y0, x1, y1], 1)
+    }
+
+    /// Tuiles de relief qui couvrent la zone `width × height` dont le coin est le pixel monde `origin`
+    /// (zoom `level_zoom`), à ombrer sur le GPU.
+    pub fn tiles_over(&self, level_zoom: f64, origin: [f64; 2], width: usize, height: usize) -> Vec<ShadeTile<'_>> {
+        let z = self.tile_zoom(level_zoom);
+        let count = 1i64 << z;
+        // Pixels monde par tuile de relief.
+        let tile = world_size(level_zoom) / count as f64;
+        let range =
+            |from: f64, length: usize| (from / tile).floor() as i64..=((from + length as f64) / tile).ceil() as i64 - 1;
+        let mut tiles = Vec::new();
+        for y in range(origin[1], height).filter(|y| (0..count).contains(y)) {
+            for x in range(origin[0], width) {
+                let key = TileKey { z, x: x.rem_euclid(count) as u32, y: y as u32 };
+                let [top, bottom] = tile_lat_range(key);
+                tiles.push(ShadeTile {
+                    key,
+                    rect: [
+                        (x as f64 * tile - origin[0]) as f32,
+                        (y as f64 * tile - origin[1]) as f32,
+                        tile as f32,
+                        tile as f32,
+                    ],
+                    latitudes: [top as f32, bottom as f32],
+                    slopes: Box::new(move || self.prepared(key)),
+                });
+            }
+        }
+        tiles
+    }
+
+    /// Constantes de `standard_hillshade` pour le shader : intensité, force, ln de la base, `base^(π/2) − 1`.
+    pub fn shading(&self) -> [f32; 4] {
+        let shading = Shading::new(self.exaggeration as f32);
+        [shading.intensity, shading.strength, shading.ln_base, shading.max_scaled]
     }
 
     fn elevations(&self, key: TileKey) -> Option<Arc<Vec<f32>>> {

@@ -5,14 +5,52 @@
 struct Layer {
     // Gauche, haut, largeur, hauteur en pixels de la cible.
     rect: vec4<f32>,
-    // Largeur et hauteur de la cible ; z : 0 texture telle quelle, 1 texture retouchée, 2 couleur unie.
+    // Largeur et hauteur de la cible ; z : 0 texture telle quelle, 1 texture retouchée, 2 couleur unie,
+    // 3 ombrage.
     canvas: vec4<f32>,
     // Retouche de couleur, sur les couleurs non prémultipliées : matrix × rgba + offset.
     matrix: mat4x4<f32>,
     offset: vec4<f32>,
     // Couleur unie, prémultipliée.
     color: vec4<f32>,
+    // Ombrage : intensité, force, ln de la base, base^(π/2) − 1 (`Hillshade::shading`).
+    shading: vec4<f32>,
+    // Ombrage : latitudes des bords haut et bas de la tuile de relief, en degrés.
+    latitudes: vec4<f32>,
 };
+
+const PI: f32 = 3.14159265358979;
+// Couleurs d'ombre et de lumière, direction de la lumière (335°, plus π) : celles de `hillshade.rs`.
+const SHADOW: vec3<f32> = vec3<f32>(31.0, 42.0, 26.0) / 255.0;
+const HIGHLIGHT: vec3<f32> = vec3<f32>(255.0, 247.0, 224.0) / 255.0;
+const AZIMUTH: f32 = 335.0 * PI / 180.0 + PI;
+// Côté de la grille des pentes : la tuile de relief et une bordure d'un texel.
+const PREPARED: f32 = 258.0;
+
+// `standard_hillshade` de MapLibre, en couleur prémultipliée.
+fn hillshade(uv: vec2<f32>) -> vec4<f32> {
+    // Texel k de la grille : pixel k − 1 de la tuile.
+    let slopes = textureSample(source, bilinear, (uv * (PREPARED - 2.0) + 1.0) / PREPARED).rg;
+    let latitude = mix(layer.latitudes.y, layer.latitudes.x, 1.0 - uv.y);
+    let deriv = (slopes - 128.0 / 255.0) * (8.0 / cos(radians(latitude)));
+    let slope = atan(0.625 * length(deriv));
+    var aspect = PI / 2.0 * select(-1.0, 1.0, deriv.y > 0.0);
+    if deriv.x != 0.0 {
+        aspect = atan2(deriv.y, -deriv.x);
+    }
+    let intensity = layer.shading.x;
+    let strength = layer.shading.y;
+    var scaled = slope;
+    if intensity != 0.5 {
+        scaled = (exp(slope * layer.shading.z) - 1.0) / layer.shading.w * PI / 2.0;
+    }
+    let accent = (1.0 - cos(scaled)) * strength;
+    let turn = (aspect + AZIMUTH) / PI + 0.5;
+    let shade = abs(turn - 2.0 * floor(turn / 2.0) - 1.0);
+    let weight = sin(scaled) * strength;
+    let rgb = mix(SHADOW, HIGHLIGHT, shade) * weight;
+    return clamp(vec4<f32>(rgb, accent * (1.0 - weight) + weight), vec4<f32>(0.0), vec4<f32>(1.0));
+}
 
 @group(0) @binding(0) var<uniform> layer: Layer;
 @group(0) @binding(1) var bilinear: sampler;
@@ -37,6 +75,9 @@ fn layer_vertex(@builtin(vertex_index) index: u32) -> LayerOut {
 @fragment
 fn layer_fragment(in: LayerOut) -> @location(0) vec4<f32> {
     let mode = layer.canvas.z;
+    if mode > 2.5 {
+        return hillshade(in.uv);
+    }
     if mode > 1.5 {
         return layer.color;
     }

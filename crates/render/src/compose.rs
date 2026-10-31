@@ -10,9 +10,12 @@ use skia_safe::Image;
 use crate::atlas::ChunkLayers;
 use crate::cache::Lru;
 use crate::gpu::{COLOR_FORMAT, MIP_LEVELS, RgbaImage, upload};
+use crate::hillshade::{PREPARED, Prepared};
 
 /// Tuiles d'imagerie gardées en mémoire vidéo : 350 Ko chacune avec leurs mipmaps.
 const TILES: usize = 768;
+/// Pentes de tuiles de relief gardées en mémoire vidéo : 130 Ko chacune.
+const SLOPES: usize = 512;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -22,6 +25,8 @@ struct LayerUniform {
     matrix: [[f32; 4]; 4],
     offset: [f32; 4],
     color: [f32; 4],
+    shading: [f32; 4],
+    latitudes: [f32; 4],
 }
 
 /// Comment `layer_fragment` colore un calque.
@@ -30,6 +35,7 @@ enum Mode {
     Texture = 0,
     Adjusted = 1,
     Solid = 2,
+    Hillshade = 3,
 }
 
 impl LayerUniform {
@@ -40,6 +46,8 @@ impl LayerUniform {
             matrix: [[0.0; 4]; 4],
             offset: [0.0; 4],
             color: [0.0; 4],
+            shading: [0.0; 4],
+            latitudes: [0.0; 4],
         }
     }
 }
@@ -57,6 +65,7 @@ pub struct Composer {
     /// Texture de remplacement des calques unis, qui n'en lisent pas.
     blank: wgpu::TextureView,
     tiles: Lru<u64, Option<Arc<wgpu::TextureView>>>,
+    slopes: Lru<u64, Option<Arc<wgpu::TextureView>>>,
 }
 
 impl Composer {
@@ -156,7 +165,31 @@ impl Composer {
             stride: (size_of::<LayerUniform>() as u64).div_ceil(alignment) * alignment,
             blank,
             tiles: Lru::new(TILES),
+            slopes: Lru::new(SLOPES),
         }
+    }
+
+    /// Pentes préparées d'une tuile de relief, deux canaux de 8 bits filtrés en bilinéaire comme dans `render`.
+    fn upload_slopes(&self, slopes: &Prepared) -> wgpu::TextureView {
+        let side = PREPARED as u32;
+        let size = wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("pentes"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rg8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            texture.as_image_copy(),
+            slopes.as_flattened(),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(side * 2), rows_per_image: Some(side) },
+            size,
+        );
+        texture.create_view(&Default::default())
     }
 
     /// La texture du morceau, `side × side` pixels et ses mipmaps.
@@ -197,8 +230,19 @@ impl Composer {
             }
         }
         let texture_of = |image: &Image| Arc::new(upload(device, &self.queue, &RgbaImage::of(image), 1));
-        if let Some((grid, [width, height])) = &layers.hillshade {
-            calls.push((LayerUniform::new([0.0, 0.0, *width, *height], target, Mode::Texture), texture_of(grid)));
+        if let Some(shade) = &layers.hillshade {
+            for tile in &shade.tiles {
+                let key = hash((shade.source, tile.key));
+                let view = self
+                    .slopes
+                    .get_or_insert_with(&key, || (tile.slopes)().map(|slopes| Arc::new(self.upload_slopes(&slopes))));
+                if let Some(view) = view {
+                    let mut uniform = LayerUniform::new(tile.rect, target, Mode::Hillshade);
+                    uniform.shading = shade.shading;
+                    uniform.latitudes = [tile.latitudes[0], tile.latitudes[1], 0.0, 0.0];
+                    calls.push((uniform, view));
+                }
+            }
         }
         let blank = Arc::new(self.blank.clone());
         if layers.tint[3] > 0.0 {
@@ -296,4 +340,11 @@ impl Composer {
         self.queue.submit([encoder.finish()]);
         texture.create_view(&Default::default())
     }
+}
+
+fn hash(value: impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }

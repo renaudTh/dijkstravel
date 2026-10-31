@@ -15,7 +15,7 @@ use crate::cache::Lru;
 use crate::color::parse_color;
 use crate::elevation::Elevation;
 use crate::frame::Camera;
-use crate::hillshade::Hillshade;
+use crate::hillshade::{Hillshade, ShadeTile};
 use crate::mercator::{View, world_size};
 use crate::model::{BasemapTheme, ImagerySource, Input, TileSource};
 use crate::tiles::{DEFAULT_SEA_SHARE, TileKey, TileStore};
@@ -64,12 +64,19 @@ pub struct ChunkLayers<'a> {
     pub adjust: [f32; 20],
     /// Tuiles de la mer puis de l'imagerie principale.
     pub tiles: Vec<LayerTile<'a>>,
-    /// Ombrage calculé sur sa grille (un pixel pour `step × step` pixels du morceau), et la zone du morceau
-    /// qu'elle couvre, à agrandir en bilinéaire.
-    pub hillshade: Option<(Image, [f32; 2])>,
+    pub hillshade: Option<ShadeLayer<'a>>,
     pub tint: [f32; 4],
     /// Frontières sur fond transparent, à la taille du morceau ; aucune si elles ne le traversent pas.
     pub borders: Option<Image>,
+}
+
+/// L'ombrage d'un morceau, calculé sur le GPU à partir des pentes des tuiles de relief.
+pub struct ShadeLayer<'a> {
+    /// Identifie les tuiles de relief, d'un morceau à l'autre, avec leur clé.
+    pub source: u64,
+    /// `Hillshade::shading`.
+    pub shading: [f32; 4],
+    pub tiles: Vec<ShadeTile<'a>>,
 }
 
 /// Une tuile d'imagerie posée dans un morceau.
@@ -303,16 +310,11 @@ impl Atlas {
                 });
             }
         }
-        let hillshade = self
-            .hillshade
-            .enabled()
-            .then(|| self.hillshade.grid(zoom, [x0, y0], side as usize, side as usize))
-            .flatten()
-            .map(|(grid, step)| {
-                let covered = |count: i32| (count as usize * step) as f32;
-                let covers = [covered(grid.width()), covered(grid.height())];
-                (grid, covers)
-            });
+        let hillshade = self.hillshade.enabled().then(|| ShadeLayer {
+            source: self.id,
+            shading: self.hillshade.shading(),
+            tiles: self.hillshade.tiles_over(zoom, [x0, y0], side as usize, side as usize),
+        });
         let borders = self.borders.as_ref().and_then(|borders| {
             let mut surface = surfaces::raster_n32_premul((side, side)).expect("surface des frontières");
             borders.draw(surface.canvas(), zoom, [x0, y0], f64::from(side), f64::from(side));
