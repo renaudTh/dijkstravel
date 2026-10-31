@@ -59,6 +59,8 @@ pub struct Variant {
     pub duration: Option<f64>,
     /// À la place de `camera.stopSlowdown` du thème.
     pub stop_slowdown: Option<f64>,
+    /// Ni ralenti aux lieux ni aux repères.
+    pub no_slowdown: bool,
     /// En relief : sinon la caméra reste à plat, quel que soit `camera.pitch` du thème.
     pub relief: bool,
 }
@@ -68,14 +70,19 @@ impl Variant {
     pub fn options(&self) -> String {
         let duration = self.duration.map(|duration| format!(" --duration {duration}"));
         let slowdown = self.stop_slowdown.map(|slowdown| format!(" --stop-slowdown {slowdown}"));
+        let none = if self.no_slowdown { " --no-slowdown" } else { "" };
         let relief = if self.relief { " --3d" } else { "" };
-        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + relief
+        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + none + relief
     }
 
     /// Le thème avec les réglages forcés.
     pub fn apply(&self, theme: &mut Theme) {
         if let Some(slowdown) = self.stop_slowdown {
             theme.camera.stop_slowdown = slowdown;
+        }
+        if self.no_slowdown {
+            theme.camera.stop_slowdown = 0.0;
+            theme.camera.marker_slowdown = 0.0;
         }
         theme.camera.pitch = match (self.relief, theme.camera.pitch) {
             (false, _) => 0.0,
@@ -88,8 +95,9 @@ impl Variant {
     fn suffix(&self) -> String {
         let duration = self.duration.map(|duration| format!("-{duration}s"));
         let slowdown = self.stop_slowdown.map(|slowdown| format!("-ralenti-{slowdown}"));
+        let none = if self.no_slowdown { "-sans-ralenti" } else { "" };
         let relief = if self.relief { "-3d" } else { "" };
-        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + relief
+        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + none + relief
     }
 }
 
@@ -128,9 +136,9 @@ pub fn main(
         return fail("--stop-slowdown attend un nombre de 0 à 5");
     }
     if montage::is_montage(arg) {
-        if variant.duration.is_some() || variant.stop_slowdown.is_some() || variant.relief {
+        if variant.duration.is_some() || variant.stop_slowdown.is_some() || variant.no_slowdown || variant.relief {
             return fail(
-                "--duration, --stop-slowdown et --3d ne s'appliquent pas à un montage : régler chaque segment et son thème",
+                "--duration, --stop-slowdown, --no-slowdown et --3d ne s'appliquent pas à un montage : régler chaque segment et son thème",
             );
         }
         return montage::render(arg, seconds, threads, frame.map(|(frame, _)| frame));

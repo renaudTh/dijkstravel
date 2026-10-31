@@ -46,6 +46,10 @@ enum Command {
         /// `video-ralenti-<n>.mp4` (`video-<d>s-ralenti-<n>.mp4` avec `--duration d`).
         #[arg(long)]
         stop_slowdown: Option<f64>,
+        /// Sans aucun ralenti, ni aux lieux ni aux repères (`camera.stopSlowdown` et `markerSlowdown` à 0) ;
+        /// écrit `video-sans-ralenti.mp4`.
+        #[arg(long, conflicts_with = "stop_slowdown")]
+        no_slowdown: bool,
         /// Threads de rendu (tous les cœurs par défaut).
         #[arg(long)]
         threads: Option<usize>,
@@ -73,6 +77,9 @@ enum Command {
         /// Envoie la variante rendue avec `render --stop-slowdown n`.
         #[arg(long)]
         stop_slowdown: Option<f64>,
+        /// Envoie la variante sans ralenti (`render --no-slowdown`).
+        #[arg(long, conflicts_with = "stop_slowdown")]
+        no_slowdown: bool,
         /// Envoie la variante en relief (`render --3d`).
         #[arg(long = "3d")]
         relief: bool,
@@ -92,17 +99,19 @@ fn main() -> ExitCode {
     let outcome = match Cli::parse().command {
         Command::Validate { run } => validate(&run),
         Command::Solve { run } => solve::main(&run),
-        Command::Render { run, seconds, duration, stop_slowdown, threads, frame, no_hud, relief } => render::main(
-            &run,
-            seconds,
-            render::Variant { duration, stop_slowdown, relief },
-            threads,
-            frame.map(|frame| (frame, !no_hud)),
-        ),
+        Command::Render { run, seconds, duration, stop_slowdown, no_slowdown, threads, frame, no_hud, relief } => {
+            render::main(
+                &run,
+                seconds,
+                render::Variant { duration, stop_slowdown, no_slowdown, relief },
+                threads,
+                frame.map(|frame| (frame, !no_hud)),
+            )
+        }
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
-        Command::Upload { run, duration, stop_slowdown, relief } => {
-            upload::main(&run, render::Variant { duration, stop_slowdown, relief })
+        Command::Upload { run, duration, stop_slowdown, no_slowdown, relief } => {
+            upload::main(&run, render::Variant { duration, stop_slowdown, no_slowdown, relief })
         }
         Command::Editor { run } => editor::main(&run),
     };
