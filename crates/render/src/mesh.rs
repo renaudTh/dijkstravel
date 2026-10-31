@@ -82,11 +82,9 @@ impl Meshes {
         let margin = world_size(level_zoom) / ((DIM as f64) * f64::from(1u32 << self.tile_zoom(key.level)));
         let bounds = [x0, y0, x0 + chunk + margin, y0 + chunk + margin];
         let name = &self.elevation.name;
-        self.elevation
-            .tiles_covering(self.tile_zoom(key.level), level_zoom, bounds, 0)
-            .into_iter()
-            .map(|t| format!("{name}/{}/{}/{}", t.z, t.x, t.y))
-            .collect()
+        let tiles = self.elevation.tiles_covering(self.tile_zoom(key.level), level_zoom, bounds, 0);
+        let parents = Elevation::parent_tiles(&tiles);
+        tiles.into_iter().chain(parents).map(|t| format!("{name}/{}/{}/{}", t.z, t.x, t.y)).collect()
     }
 }
 
@@ -150,7 +148,9 @@ mod tests {
         assert_eq!(meshes.tile_zoom(0), 11);
         assert_eq!(Meshes::new(Arc::new(Elevation::new("/x", "terrarium", 14)), 17.6).tile_zoom(0), 14);
         // Un morceau de 512 pixels au zoom 13 couvre un quart de tuile de relief au zoom 11 (et sa voisine
-        // pour le dernier pixel).
-        assert!(!meshes.tiles_of(key).is_empty() && meshes.tiles_of(key).len() <= 4);
+        // pour le dernier pixel), plus leurs parentes, qui bouchent leurs trous.
+        let tiles = meshes.tiles_of(key);
+        assert!(tiles.iter().filter(|t| t.starts_with("terrarium/11/")).count() <= 4);
+        assert!(tiles.iter().any(|t| t.starts_with("terrarium/10/")));
     }
 }
