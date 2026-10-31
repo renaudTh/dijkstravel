@@ -22,8 +22,8 @@ pub const ZOOM: u8 = 12;
 const CLASSES: [(&str, f64); 3] = [("city", 2500.0), ("town", 1200.0), ("village", 600.0)];
 /// Le nom apparaît quand la tête est à cette part d'écran de la localité, et reste jusqu'à cette part
 /// après.
-const LEAD_SCREENS: f64 = 0.6;
-const TRAIL_SCREENS: f64 = 0.35;
+const LEAD_SCREENS: f64 = 0.8;
+const TRAIL_SCREENS: f64 = 0.5;
 /// Part de sa présence sur laquelle le nom apparaît, puis s'efface.
 const FADE_SHARE: f64 = 0.25;
 /// Noms à la fois au plus.
