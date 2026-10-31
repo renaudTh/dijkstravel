@@ -26,6 +26,12 @@ const HIGHLIGHT: [f32; 3] = [1.0, 0xf7 as f32 / 255.0, 0xe0 as f32 / 255.0];
 /// `hillshade-illumination-direction` par défaut (335°), plus π comme dans le shader.
 const AZIMUTH: f32 = 335.0 * PI / 180.0 + PI;
 
+/// Pixels de relief agrandis au plus sur ce nombre de pixels de l'ombrage calculé : au-delà, il est calculé
+/// sur une grille plus lâche (un pixel sur 2, 4 ou 8) puis agrandi. Les pentes varient bilinéairement
+/// dans un pixel de relief ; échantillonnées deux fois par pixel au moins, l'écart reste invisible.
+const SAMPLES_PER_DEM_PIXEL: f64 = 2.0;
+const MAX_STEP: usize = 8;
+
 /// Pentes quantifiées sur 8 bits par canal, comme la texture que remplit `hillshadePrepare`.
 type Prepared = Vec<[u8; 2]>;
 
@@ -123,13 +129,21 @@ impl Hillshade {
         // Pixels de tuile de relief par pixel monde.
         let to_dem = tiles_at_zoom * DIM as f64 / world_size(level_zoom);
         let shading = Shading::new(self.exaggeration as f32);
-        let mut pixels = vec![0u8; width * height * 4];
+        // Au-delà du zoom de relief le plus fin, un pixel de relief couvre des dizaines de pixels.
+        let mut step = 1;
+        while step < MAX_STEP && (2 * step) as f64 * to_dem * SAMPLES_PER_DEM_PIXEL <= 1.0 {
+            step *= 2;
+        }
+        let (columns, rows) = (width.div_ceil(step), height.div_ceil(step));
+        // Centre du pixel `k` de la grille, en pixels monde depuis le coin.
+        let center = |k: usize| (k * step) as f64 + step as f64 / 2.0;
+        let mut pixels = vec![0u8; columns * rows * 4];
         // Lignes réparties sur les cœurs : un morceau d'atlas compte 266 000 pixels.
-        pixels.par_chunks_mut(width * 4).enumerate().for_each(|(row, out)| {
-            let dem_y = (origin[1] + row as f64 + 0.5) * to_dem;
+        pixels.par_chunks_mut(columns * 4).enumerate().for_each(|(row, out)| {
+            let dem_y = (origin[1] + center(row)) * to_dem;
             let mut current: Option<(TileKey, Option<Arc<Prepared>>, f32)> = None;
-            for column in 0..width {
-                let dem_x = (origin[0] + column as f64 + 0.5) * to_dem;
+            for column in 0..columns {
+                let dem_x = (origin[0] + center(column)) * to_dem;
                 let key = TileKey {
                     z,
                     x: ((dem_x / DIM as f64).floor() as i64).rem_euclid(1 << z) as u32,
@@ -154,8 +168,19 @@ impl Hillshade {
                 }
             }
         });
-        let info = ImageInfo::new((width as i32, height as i32), ColorType::RGBA8888, AlphaType::Premul, None);
-        skia_safe::images::raster_from_data(&info, Data::new_copy(&pixels), width * 4)
+        let info = ImageInfo::new((columns as i32, rows as i32), ColorType::RGBA8888, AlphaType::Premul, None);
+        let grid = skia_safe::images::raster_from_data(&info, Data::new_copy(&pixels), columns * 4)?;
+        if step == 1 {
+            return Some(grid);
+        }
+        // Agrandie en bilinéaire : chaque pixel de la grille couvre `step × step` pixels, centrés.
+        let mut surface = skia_safe::surfaces::raster_n32_premul((width as i32, height as i32))?;
+        let dest = skia_safe::Rect::from_wh((columns * step) as f32, (rows * step) as f32);
+        let sampling = skia_safe::SamplingOptions::new(skia_safe::FilterMode::Linear, skia_safe::MipmapMode::None);
+        let mut paint = skia_safe::Paint::default();
+        paint.set_blend_mode(skia_safe::BlendMode::Src);
+        surface.canvas().draw_image_rect_with_sampling_options(&grid, None, dest, sampling, &paint);
+        Some(surface.image_snapshot())
     }
 }
 
