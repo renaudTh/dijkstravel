@@ -306,7 +306,7 @@ fn dashed_stroke(canvas: &Canvas, path: &skia_safe::Path, width: f32, core_width
 }
 
 /// `line-blur` : opacité `(bord − distance) / (flou + 1)` bornée à [0, 1], le bord étant à demi-largeur
-/// + 0,5. Somme de traits de largeurs étagées, chacun d'opacité 1 / n, additionnés dans un calque.
+/// + 0,5. Somme de n traits de largeurs étagées, chacun comptant pour 1 / n.
 fn blurred_stroke(canvas: &Canvas, path: &skia_safe::Path, width: f32, blur: f32, color: Color) {
     if blur < 0.25 {
         stroke(canvas, path, width, color);
@@ -314,16 +314,26 @@ fn blurred_stroke(canvas: &Canvas, path: &skia_safe::Path, width: f32, blur: f32
     }
     let outset = width / 2.0 + 0.5;
     let ramp = blur + 1.0;
-    canvas.save_layer(&SaveLayerRec::default());
-    let step_alpha = 1.0 / BLUR_STEPS as f32;
-    for k in 0..BLUR_STEPS {
-        let radius = outset - ramp * (k as f32 + 0.5) / BLUR_STEPS as f32;
-        if radius <= 0.0 {
-            continue;
+    let radius = |k: usize| outset - ramp * (k as f32 + 0.5) / BLUR_STEPS as f32;
+    let opaque = color.a() == 255;
+    if !opaque {
+        // Couleur translucide : traits additionnés dans un calque, borné au tracé, puis posé d'un coup.
+        let bounds = path.bounds().with_outset((outset + 1.0, outset + 1.0));
+        canvas.save_layer(&SaveLayerRec::default().bounds(&bounds));
+    }
+    for k in (0..BLUR_STEPS).filter(|&k| radius(k) > 0.0) {
+        let mut paint = stroke_paint(radius(k) * 2.0, color);
+        if opaque {
+            // Posés l'un sur l'autre du plus large au plus fin, sans calque : le k-ième, d'opacité
+            // 1 / (n − k), couvre ce que les k premiers laissaient, et la couverture sous k + 1 traits
+            // est (k + 1) / n, comme leur somme.
+            paint.set_alpha_f(1.0 / (BLUR_STEPS - k) as f32);
+        } else {
+            paint.set_alpha_f(color.a() as f32 / 255.0 / BLUR_STEPS as f32).set_blend_mode(BlendMode::Plus);
         }
-        let mut paint = stroke_paint(radius * 2.0, color);
-        paint.set_alpha_f(step_alpha).set_blend_mode(BlendMode::Plus);
         canvas.draw_path(path, &paint);
     }
-    canvas.restore();
+    if !opaque {
+        canvas.restore();
+    }
 }
