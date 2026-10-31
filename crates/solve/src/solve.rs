@@ -199,6 +199,7 @@ pub fn assemble_tour(
         transfers: Vec::new(),
         stages: Vec::new(),
         markers: Vec::new(),
+        timeline: Vec::new(),
         routed_meters: route.meters,
     })
 }

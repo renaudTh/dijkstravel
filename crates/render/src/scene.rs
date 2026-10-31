@@ -92,7 +92,7 @@ impl Scene {
             vector: download::vector_source(),
             tile_dir: self.downloader.tile_dir().display().to_string(),
             hud_fonts: self.downloader.hud_fonts(&theme.hud.font)?,
-            clock: self.clock,
+            clock: self.clock.clone(),
             theme,
         })
     }

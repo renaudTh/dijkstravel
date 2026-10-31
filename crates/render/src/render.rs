@@ -417,9 +417,8 @@ impl Renderer {
         if light.sunlight <= 0.0 {
             return None;
         }
-        if let Some(clock) = self.input.clock {
-            let progress = meters / self.animation.total_meters().max(1e-9);
-            return Some(Sun::at_time(clock.at(progress), center, light.sunlight));
+        if let Some(clock) = &self.input.clock {
+            return Some(Sun::at_time(clock.at(meters), center, light.sunlight));
         }
         let progress = f64::from(frame) / f64::from(self.frame_count().saturating_sub(1).max(1));
         let course = light.sun_from + (light.sun_to - light.sun_from) * progress;

@@ -3,6 +3,7 @@
 mod clock;
 mod console;
 mod editor;
+mod import;
 mod load;
 mod montage;
 mod publication;
@@ -34,6 +35,9 @@ enum Command {
         /// `runs/<nom>` ou `runs/<nom>/run.json`.
         run: PathBuf,
     },
+    /// Crée un run complet depuis une activité enregistrée (GPX) : tracé, départ et arrivée, cols et
+    /// sommets franchis, heures de passage.
+    Import(import::Import),
     /// Calcule la tournée (`tour.json`) par OSRM et VROOM.
     Solve { run: PathBuf },
     /// Rend la vidéo (`data/out/<nom>/video.mp4`) à partir du seul `tour.json`.
@@ -81,7 +85,8 @@ enum Command {
         /// Avec `--3d`, heure locale du départ, à la place de `schedule.start` du run, avec `--finish-time`
         /// (`2026-07-24T05:30`) : le relief s'éclaire du vrai soleil et de la vraie lune, l'heure suivant
         /// l'avancée sur le tracé, dans le fuseau du lieu ; écrit `video-3d-horaire-<départ>-<arrivée>.mp4`.
-        /// Sans elle, un run qui a des horaires s'éclaire des siens en relief.
+        /// Sans elle, un run s'éclaire en relief des heures de passage de son activité (`import`), sinon de
+        /// ses horaires.
         #[arg(long, value_name = "AAAA-MM-JJTHH:MM", value_parser = local_time, requires = "finish_time", conflicts_with = "sun")]
         start_time: Option<LocalDateTime>,
         /// Heure locale de l'arrivée, avec `--start-time`.
@@ -171,6 +176,7 @@ fn main() -> ExitCode {
     let outcome = match Cli::parse().command {
         Command::Validate { run } => validate(&run),
         Command::Solve { run } => solve::main(&run),
+        Command::Import(import) => import::main(import),
         Command::Render {
             run,
             seconds,

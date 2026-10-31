@@ -5,6 +5,7 @@
 
 pub mod atp;
 pub mod csv;
+pub mod gpx;
 pub mod overpass;
 
 use dijkstravel_core::geo::BBox;

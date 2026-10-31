@@ -91,6 +91,65 @@ impl OverpassPlaces {
 }
 
 /// `url` : `OVERPASS_URL` ou une instance à soi.
+/// Un col ou un sommet nommé d'OpenStreetMap.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Summit {
+    pub name: String,
+    pub at: LonLat,
+    /// Altitude du tag `ele`, en mètres.
+    pub elevation: Option<f64>,
+    /// Col (`natural=saddle`, `mountain_pass=yes`), sinon sommet.
+    pub pass: bool,
+}
+
+/// Cols et sommets nommés de la zone.
+pub fn summits_query(bbox: &BBox) -> String {
+    let area = format!("({},{},{},{})", bbox.south, bbox.west, bbox.north, bbox.east);
+    format!(
+        "[out:json][timeout:120];(node{area}[name][natural~\"^(saddle|peak|volcano)$\"];node{area}[name][mountain_pass=yes];);out;"
+    )
+}
+
+pub fn parse_summits(raw: &Value) -> Result<Vec<Summit>, String> {
+    let elements = raw["elements"].as_array().ok_or("Overpass : réponse sans tableau elements")?;
+    // Une requête interrompue (délai, mémoire) répond quand même, vide, avec sa raison.
+    if let Some(remark) = raw["remark"].as_str().filter(|_| elements.is_empty()) {
+        return Err(format!("Overpass : {remark}"));
+    }
+    Ok(elements
+        .iter()
+        .filter_map(|element| {
+            let tags = &element["tags"];
+            let name = tags["name"].as_str()?.to_owned();
+            let at = [finite(&element["lon"])?, finite(&element["lat"])?];
+            let elevation = tags["ele"]
+                .as_str()
+                .and_then(|ele| ele.trim().trim_end_matches('m').trim().replace(',', ".").parse().ok());
+            let pass = tags["natural"] == "saddle" || tags["mountain_pass"] == "yes";
+            Some(Summit { name, at, elevation, pass })
+        })
+        .collect())
+}
+
+/// Le refuge nommé à moins de 150 m de `at`, et la commune (`admin_level=8`) qui le contient.
+pub fn place_name_query([lon, lat]: LonLat) -> String {
+    format!(
+        "[out:json][timeout:60];nwr(around:150,{lat},{lon})[name][tourism~\"^(alpine_hut|wilderness_hut)$\"];out tags;is_in({lat},{lon})->.a;area.a[\"admin_level\"=\"8\"][name];out tags;"
+    )
+}
+
+/// Le refuge s'il y en a un, sinon la commune.
+pub fn parse_place_name(raw: &Value) -> Option<String> {
+    let elements = raw["elements"].as_array()?;
+    let name = |hut: bool| {
+        elements
+            .iter()
+            .filter(|element| element["tags"]["tourism"].is_string() == hut)
+            .find_map(|element| element["tags"]["name"].as_str().map(str::to_owned))
+    };
+    name(true).or_else(|| name(false))
+}
+
 pub fn fetch(url: &str, query: &str) -> Result<Value, String> {
     let mut response = ureq::post(url)
         .header("user-agent", "dijkstravel")
@@ -115,6 +174,33 @@ mod tests {
 
     fn ids(result: &OverpassPlaces) -> Vec<&str> {
         result.places.iter().map(|place| place.id.as_str()).collect()
+    }
+
+    #[test]
+    fn names_a_place_after_its_hut_or_else_its_municipality() {
+        let commune = json!({ "type": "area", "id": 1, "tags": { "name": "Revel", "admin_level": "8" } });
+        let hut = json!({ "type": "way", "id": 2, "tags": { "name": "Refuge de la Pra", "tourism": "alpine_hut" } });
+        assert_eq!(
+            parse_place_name(&json!({ "elements": [hut, commune.clone()] })).as_deref(),
+            Some("Refuge de la Pra")
+        );
+        assert_eq!(parse_place_name(&json!({ "elements": [commune] })).as_deref(), Some("Revel"));
+        assert_eq!(parse_place_name(&json!({ "elements": [] })), None);
+    }
+
+    #[test]
+    fn reads_named_passes_and_peaks_with_their_elevation() {
+        let raw = json!({ "elements": [
+            { "type": "node", "id": 1, "lat": 45.3, "lon": 6.1, "tags": { "name": "Col de la Valloire", "natural": "saddle", "ele": "2760" } },
+            { "type": "node", "id": 2, "lat": 45.2, "lon": 6.0, "tags": { "name": "Grand Pic", "natural": "peak" } },
+        ]});
+        let summits = parse_summits(&raw).unwrap();
+        assert_eq!(
+            summits[0],
+            Summit { name: "Col de la Valloire".into(), at: [6.1, 45.3], elevation: Some(2760.0), pass: true }
+        );
+        assert!(!summits[1].pass && summits[1].elevation.is_none());
+        assert!(parse_summits(&json!({ "elements": [], "remark": "runtime error: timeout" })).is_err());
     }
 
     #[test]

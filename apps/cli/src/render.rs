@@ -15,6 +15,7 @@ use dijkstravel_core::run::Run;
 use dijkstravel_core::schedule::Schedule;
 use dijkstravel_core::theme::Theme;
 use dijkstravel_render::download::Downloader;
+use dijkstravel_render::model::Clock;
 use dijkstravel_render::render::{Image, encode};
 use dijkstravel_render::scene::Scene;
 
@@ -257,13 +258,23 @@ pub fn main(arg: &Path, seconds: Option<f64>, variant: Variant, threads: Option<
     let (mut scene, paths) = scene_variant(arg, variant)?;
     let mut theme = load::theme(&scene.run)?;
     variant.apply(&mut theme);
-    // En relief, les horaires de la variante ou du run, sauf course stylisée du soleil (`--sun`).
-    let schedule = variant.schedule.or(scene.run.schedule).filter(|_| variant.relief && variant.sun.is_none());
-    if let Some(schedule) = schedule {
-        let points = &scene.tour.path.points;
-        let (start, finish) = (points[0], points[points.len() - 1]);
-        scene.clock = Some(clock::resolve(schedule, start, finish)?);
-        if theme.camera.sunlight <= 0.0 {
+    // En relief, sauf course stylisée du soleil (`--sun`) : les horaires de la variante, sinon les heures de
+    // passage d'une activité enregistrée, sinon les horaires du run.
+    if variant.relief && variant.sun.is_none() {
+        let path = &scene.tour.path;
+        let (start, finish) = (path.points[0], path.points[path.points.len() - 1]);
+        scene.clock = match variant.schedule {
+            Some(schedule) => Some(clock::resolve(schedule, start, finish, path.total_meters())?),
+            None => match Clock::along(scene.tour.timeline.clone()) {
+                Some(recorded) => Some(recorded),
+                None => scene
+                    .run
+                    .schedule
+                    .map(|schedule| clock::resolve(schedule, start, finish, path.total_meters()))
+                    .transpose()?,
+            },
+        };
+        if scene.clock.is_some() && theme.camera.sunlight <= 0.0 {
             theme.camera.sunlight = 1.0;
         }
     }

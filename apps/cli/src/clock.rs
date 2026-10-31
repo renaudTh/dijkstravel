@@ -5,8 +5,8 @@ use dijkstravel_core::geo::LonLat;
 use dijkstravel_core::schedule::{LocalDateTime, Schedule};
 use dijkstravel_render::model::Clock;
 
-/// Les instants du départ, à `start`, et de l'arrivée, à `finish`.
-pub fn resolve(schedule: Schedule, start: LonLat, finish: LonLat) -> Result<Clock, String> {
+/// Les instants du départ, à `start`, et de l'arrivée, à `finish`, au bout de `meters`.
+pub fn resolve(schedule: Schedule, start: LonLat, finish: LonLat, meters: f64) -> Result<Clock, String> {
     let finder = tzf_rs::DefaultFinder::new();
     let instant = |at: LocalDateTime, [lon, lat]: LonLat| -> Result<f64, String> {
         let zone = finder.get_tz_name(lon, lat);
@@ -24,14 +24,30 @@ pub fn resolve(schedule: Schedule, start: LonLat, finish: LonLat) -> Result<Cloc
         let zoned = civil.to_zoned(tz).map_err(|error| format!("{at} dans {zone} : {error}"))?;
         Ok(zoned.timestamp().as_second() as f64)
     };
-    let clock = Clock { start: instant(schedule.start, start)?, finish: instant(schedule.finish, finish)? };
-    if clock.finish <= clock.start {
+    let clock = Clock::between(instant(schedule.start, start)?, instant(schedule.finish, finish)?, meters);
+    if clock.finish() <= clock.start() {
         return Err(format!(
             "arrivée ({}) avant le départ ({}) une fois les fuseaux pris en compte",
             schedule.finish, schedule.start
         ));
     }
     Ok(clock)
+}
+
+/// L'heure locale, à la minute, de l'instant `unix` (secondes UTC) au lieu `at`.
+pub fn local(unix: f64, [lon, lat]: LonLat) -> Result<LocalDateTime, String> {
+    let zone = tzf_rs::DefaultFinder::new().get_tz_name(lon, lat).to_owned();
+    let tz = jiff::tz::TimeZone::get(&zone).map_err(|error| format!("fuseau {zone} : {error}"))?;
+    let instant = jiff::Timestamp::from_second(unix.round() as i64).map_err(|error| format!("{unix} : {error}"))?;
+    let civil = instant.to_zoned(tz).datetime();
+    Ok(LocalDateTime {
+        year: i32::from(civil.year()),
+        month: civil.month() as u8,
+        day: civil.day() as u8,
+        hour: civil.hour() as u8,
+        minute: civil.minute() as u8,
+        second: 0,
+    })
 }
 
 #[cfg(test)]
@@ -46,14 +62,23 @@ mod tests {
     fn reads_local_hours_in_the_time_zone_of_the_place() {
         let paris = [2.35, 48.86];
         // Heure d'été en juillet (UTC + 2), d'hiver en janvier (UTC + 1).
-        let summer = resolve(Schedule { start: at("2026-07-24T05:30"), finish: at("2026-07-24T07:30") }, paris, paris);
-        assert_eq!(summer.unwrap().start, 1_784_863_800.0);
-        let winter = resolve(Schedule { start: at("2026-01-24T05:30"), finish: at("2026-01-24T07:30") }, paris, paris);
-        assert_eq!(winter.unwrap().start, 1_769_229_000.0);
+        let summer =
+            resolve(Schedule { start: at("2026-07-24T05:30"), finish: at("2026-07-24T07:30") }, paris, paris, 1.0);
+        assert_eq!(summer.unwrap().start(), 1_784_863_800.0);
+        let winter =
+            resolve(Schedule { start: at("2026-01-24T05:30"), finish: at("2026-01-24T07:30") }, paris, paris, 1.0);
+        assert_eq!(winter.unwrap().start(), 1_769_229_000.0);
         // Départ à Lisbonne (UTC + 1 l'été), arrivée à Paris (UTC + 2) : une heure de trajet.
         let lisbon = [-9.14, 38.72];
-        let trip = resolve(Schedule { start: at("2026-07-24T10:00"), finish: at("2026-07-24T12:00") }, lisbon, paris);
+        let trip =
+            resolve(Schedule { start: at("2026-07-24T10:00"), finish: at("2026-07-24T12:00") }, lisbon, paris, 1.0);
         let trip = trip.unwrap();
-        assert_eq!(trip.finish - trip.start, 3_600.0);
+        assert_eq!(trip.finish() - trip.start(), 3_600.0);
+    }
+
+    #[test]
+    fn writes_instants_in_the_local_time_of_the_place() {
+        // 2024-08-12T05:34:36Z en Savoie : 7 h 34, heure d'été.
+        assert_eq!(local(1_723_440_876.0, [6.0, 45.4]).unwrap(), at("2024-08-12T07:34"));
     }
 }

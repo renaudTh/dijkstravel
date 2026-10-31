@@ -82,6 +82,10 @@ pub struct Tour {
     /// Sprints et ascensions des étapes, dans l'ordre du parcours. Absent : aucun.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<Marker>,
+    /// Heures de passage d'une activité enregistrée (GPX) : `[mètres le long de path, secondes UTC]`,
+    /// croissants. En relief, le soleil et la lune suivent alors l'allure réelle. Absent : aucune.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub timeline: Vec<[f64; 2]>,
     /// Distance annoncée par OSRM, pour contrôler `path`.
     pub routed_meters: f64,
 }

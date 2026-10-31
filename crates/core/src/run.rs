@@ -91,7 +91,7 @@ pub struct Publication {
     pub hashtags: Vec<String>,
 }
 
-pub const SOURCE_KINDS: [&str; 4] = ["overpass", "csv", "atp", "manuel"];
+pub const SOURCE_KINDS: [&str; 5] = ["overpass", "csv", "atp", "manuel", "gpx"];
 
 /// D'où viennent les lieux : ce qu'il faut pour les refaire, une fois le script jeté.
 #[derive(Debug, Clone, PartialEq)]

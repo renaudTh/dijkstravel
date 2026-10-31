@@ -31,18 +31,64 @@ pub struct Input {
     pub clock: Option<Clock>,
 }
 
-/// Instants du départ et de l'arrivée, en secondes UTC depuis 1970. Entre les deux, l'heure suit les
-/// mètres parcourus, à allure constante.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Heures de passage le long du tracé : `[mètres, secondes UTC depuis 1970]`, croissants. Entre deux
+/// passages, l'heure suit les mètres parcourus à allure constante.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Clock {
-    pub start: f64,
-    pub finish: f64,
+    marks: Vec<[f64; 2]>,
 }
 
 impl Clock {
-    /// L'instant à la part `progress` (0 à 1) du parcours.
-    pub fn at(&self, progress: f64) -> f64 {
-        self.start + (self.finish - self.start) * progress.clamp(0.0, 1.0)
+    /// Du départ, à `start`, à l'arrivée, à `finish`, au bout de `meters`, à allure constante.
+    pub fn between(start: f64, finish: f64, meters: f64) -> Clock {
+        Clock { marks: vec![[0.0, start], [meters.max(0.0), finish]] }
+    }
+
+    /// Les heures de passage d'une activité enregistrée (`Tour::timeline`), au moins deux.
+    pub fn along(marks: Vec<[f64; 2]>) -> Option<Clock> {
+        (marks.len() >= 2).then_some(Clock { marks })
+    }
+
+    pub fn start(&self) -> f64 {
+        self.marks[0][1]
+    }
+
+    pub fn finish(&self) -> f64 {
+        self.marks[self.marks.len() - 1][1]
+    }
+
+    /// L'instant du passage à `meters`.
+    pub fn at(&self, meters: f64) -> f64 {
+        let next = self.marks.partition_point(|mark| mark[0] < meters);
+        if next == 0 {
+            return self.start();
+        }
+        if next == self.marks.len() {
+            return self.finish();
+        }
+        let ([from, start], [to, end]) = (self.marks[next - 1], self.marks[next]);
+        if to <= from {
+            return end;
+        }
+        start + (end - start) * (meters - from) / (to - from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_clock_follows_the_recorded_pace() {
+        let steady = Clock::between(1000.0, 2000.0, 500.0);
+        assert_eq!(steady.at(250.0), 1500.0);
+        assert_eq!(steady.at(-10.0), 1000.0);
+        assert_eq!(steady.at(900.0), 2000.0);
+        // Le premier kilomètre en 10 minutes, le second en 20.
+        let recorded = Clock::along(vec![[0.0, 0.0], [1000.0, 600.0], [2000.0, 1800.0]]).unwrap();
+        assert_eq!(recorded.at(500.0), 300.0);
+        assert_eq!(recorded.at(1500.0), 1200.0);
+        assert!(Clock::along(vec![[0.0, 0.0]]).is_none());
     }
 }
 
