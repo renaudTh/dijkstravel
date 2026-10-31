@@ -16,6 +16,7 @@ pub mod mercator;
 pub mod model;
 pub mod monitor;
 pub mod montage;
+pub mod perspective;
 pub mod preview;
 pub mod render;
 pub mod route;
