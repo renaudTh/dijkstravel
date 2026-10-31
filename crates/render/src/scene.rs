@@ -12,7 +12,7 @@ use skia_safe::Image;
 
 use crate::download::{self, Downloader};
 use crate::frame::Timeline;
-use crate::model::{Input, Video};
+use crate::model::{Clock, Input, Video};
 use crate::monitor::Monitor;
 use crate::render::{Frames, Renderer};
 use crate::video;
@@ -27,6 +27,8 @@ pub struct Scene {
     downloader: Downloader,
     /// Largeur et hauteur à la place de celles du format du run (`video.format`).
     size: Option<(u32, u32)>,
+    /// Heures du départ et de l'arrivée (`Input::clock`), que l'app tire de `run.schedule`.
+    pub clock: Option<Clock>,
 }
 
 impl Scene {
@@ -46,6 +48,7 @@ impl Scene {
             missing_images: images.missing,
             downloader,
             size: None,
+            clock: None,
         }
     }
 
@@ -89,6 +92,7 @@ impl Scene {
             vector: download::vector_source(),
             tile_dir: self.downloader.tile_dir().display().to_string(),
             hud_fonts: self.downloader.hud_fonts(&theme.hud.font)?,
+            clock: self.clock,
             theme,
         })
     }

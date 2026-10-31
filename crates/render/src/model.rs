@@ -27,6 +27,23 @@ pub struct Input {
     pub tile_dir: String,
     /// Police de la carte d'infos, un fichier TTF par graisse.
     pub hud_fonts: Vec<String>,
+    /// Heures du départ et de l'arrivée : en relief éclairé, le soleil et la lune de ces heures-là.
+    pub clock: Option<Clock>,
+}
+
+/// Instants du départ et de l'arrivée, en secondes UTC depuis 1970. Entre les deux, l'heure suit les
+/// mètres parcourus, à allure constante.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Clock {
+    pub start: f64,
+    pub finish: f64,
+}
+
+impl Clock {
+    /// L'instant à la part `progress` (0 à 1) du parcours.
+    pub fn at(&self, progress: f64) -> f64 {
+        self.start + (self.finish - self.start) * progress.clamp(0.0, 1.0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

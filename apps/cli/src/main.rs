@@ -1,5 +1,6 @@
 //! `dijkstravel <commande> runs/<nom>` : toute la chaîne, des lieux à la vidéo publiée.
 
+mod clock;
 mod console;
 mod editor;
 mod load;
@@ -14,6 +15,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+
+use dijkstravel_core::schedule::{LocalDateTime, Schedule};
 
 use crate::load::Outcome;
 
@@ -75,6 +78,15 @@ enum Command {
         /// `video-3d-soleil-<a>-<b>.mp4`.
         #[arg(long, value_name = "A,B", value_parser = angles)]
         sun: Option<(f64, f64)>,
+        /// Avec `--3d`, heure locale du départ, à la place de `schedule.start` du run, avec `--finish-time`
+        /// (`2026-07-24T05:30`) : le relief s'éclaire du vrai soleil et de la vraie lune, l'heure suivant
+        /// l'avancée sur le tracé, dans le fuseau du lieu ; écrit `video-3d-horaire-<départ>-<arrivée>.mp4`.
+        /// Sans elle, un run qui a des horaires s'éclaire des siens en relief.
+        #[arg(long, value_name = "AAAA-MM-JJTHH:MM", value_parser = local_time, requires = "finish_time", conflicts_with = "sun")]
+        start_time: Option<LocalDateTime>,
+        /// Heure locale de l'arrivée, avec `--start-time`.
+        #[arg(long, value_name = "AAAA-MM-JJTHH:MM", value_parser = local_time, requires = "start_time")]
+        finish_time: Option<LocalDateTime>,
         /// Largeur de la vidéo en pixels, à la place du format du run, avec `--height` ; écrit
         /// `video-<l>x<h>.mp4`. Tout se met à l'échelle : 2160 × 3840, c'est la vidéo 1080 × 1920 en 4K.
         #[arg(long, requires = "height")]
@@ -113,6 +125,11 @@ enum Command {
         /// Envoie la variante éclairée par le soleil (`render --3d --sun a,b`).
         #[arg(long, value_name = "A,B", value_parser = angles)]
         sun: Option<(f64, f64)>,
+        /// Envoie la variante rendue avec `render --3d --start-time a --finish-time b`.
+        #[arg(long, value_name = "AAAA-MM-JJTHH:MM", value_parser = local_time, requires = "finish_time", conflicts_with = "sun")]
+        start_time: Option<LocalDateTime>,
+        #[arg(long, value_name = "AAAA-MM-JJTHH:MM", value_parser = local_time, requires = "start_time")]
+        finish_time: Option<LocalDateTime>,
         /// Envoie la variante sans carte d'infos (`render --no-hud`).
         #[arg(long)]
         no_hud: bool,
@@ -130,6 +147,11 @@ enum Command {
 }
 
 /// `a,b` : deux nombres séparés par une virgule.
+fn local_time(value: &str) -> Result<LocalDateTime, String> {
+    LocalDateTime::parse(value)
+        .ok_or_else(|| format!("date et heure locales attendues, comme 2026-07-24T05:30 (reçu {value})"))
+}
+
 fn angles(value: &str) -> Result<(f64, f64), String> {
     let parse = |text: &str| text.trim().parse::<f64>().map_err(|_| format!("{text} n'est pas un nombre"));
     match value.split_once(',') {
@@ -161,6 +183,8 @@ fn main() -> ExitCode {
             relief,
             zoom,
             sun,
+            start_time,
+            finish_time,
             width,
             height,
             fps,
@@ -174,6 +198,7 @@ fn main() -> ExitCode {
                 relief,
                 zoom,
                 sun,
+                schedule: start_time.zip(finish_time).map(|(start, finish)| Schedule { start, finish }),
                 no_hud,
                 size: width.zip(height),
                 fps,
@@ -191,6 +216,8 @@ fn main() -> ExitCode {
             relief,
             zoom,
             sun,
+            start_time,
+            finish_time,
             no_hud,
             width,
             height,
@@ -204,6 +231,7 @@ fn main() -> ExitCode {
                 relief,
                 zoom,
                 sun,
+                schedule: start_time.zip(finish_time).map(|(start, finish)| Schedule { start, finish }),
                 no_hud,
                 size: width.zip(height),
                 fps,

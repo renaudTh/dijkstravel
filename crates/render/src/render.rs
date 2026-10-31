@@ -388,10 +388,7 @@ impl Frames for Renderer {
             self.hold_pitches();
             let perspective = terrain.perspective(camera, width, height);
             let transfer = self.transfer_atlas.as_ref().map(|transfer| (transfer, blend));
-            let light = &self.input.theme.camera;
-            let progress = f64::from(frame) / f64::from(self.frame_count().saturating_sub(1).max(1));
-            let course = light.sun_from + (light.sun_to - light.sun_from) * progress;
-            let sun = (light.sunlight > 0.0).then(|| Sun::at(course, camera.center[1], light.sunlight));
+            let sun = self.sun_at(frame, meters, camera.center);
             let rendered = terrain.render(&self.atlas, transfer, &perspective, sun, canvas);
             let lift = self.input.theme.route.width / 2.0 * self.input.video.scale();
             let projection = terrain.projection(&self.atlas, &perspective, &rendered.depth, rendered.depth_size, lift);
@@ -412,6 +409,23 @@ impl Frames for Renderer {
 }
 
 impl Renderer {
+    /// Le soleil de l'image, si le relief est éclairé : celui de l'heure atteinte au point visé quand le
+    /// parcours a des horaires (l'heure suit les mètres parcourus), sinon sur sa course stylisée de
+    /// `camera.sunFrom` à `camera.sunTo` au fil de la vidéo.
+    fn sun_at(&self, frame: u32, meters: f64, center: [f64; 2]) -> Option<Sun> {
+        let light = &self.input.theme.camera;
+        if light.sunlight <= 0.0 {
+            return None;
+        }
+        if let Some(clock) = self.input.clock {
+            let progress = meters / self.animation.total_meters().max(1e-9);
+            return Some(Sun::at_time(clock.at(progress), center, light.sunlight));
+        }
+        let progress = f64::from(frame) / f64::from(self.frame_count().saturating_sub(1).max(1));
+        let course = light.sun_from + (light.sun_to - light.sun_from) * progress;
+        Some(Sun::at(course, center[1], light.sunlight))
+    }
+
     /// Tracé, tête, repères, lieux et carte d'infos de l'image, par-dessus le fond.
     fn draw_overlays(&self, canvas: &Canvas, view: &dyn Projection, frame: u32, with_hud: bool) {
         let (view, screen) = self.to_reference(canvas, view);

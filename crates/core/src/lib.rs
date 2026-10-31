@@ -7,6 +7,7 @@ pub mod montage;
 pub mod places;
 pub mod publication;
 pub mod run;
+pub mod schedule;
 pub mod theme;
 pub mod tour;
 

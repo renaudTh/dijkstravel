@@ -7,6 +7,7 @@ use serde_json::Value;
 use crate::Issue;
 use crate::geo::{BBox, LonLat};
 use crate::json::{field, finite, lon_lat, non_empty};
+use crate::schedule::Schedule;
 use crate::theme::is_theme_name;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +120,8 @@ pub struct Run {
     pub video: VideoSettings,
     pub overpass: Option<OverpassSource>,
     pub publication: Option<Publication>,
+    /// Heures locales de départ et d'arrivée : en relief, le soleil et la lune de ces heures-là.
+    pub schedule: Option<Schedule>,
 }
 
 impl Run {
@@ -176,9 +179,18 @@ impl Run {
             }
         };
         check(overpass.is_some(), "overpass", "{ areaIso, filter } | absent");
-        let video = parse_video(get("video"), &mut issues);
+        let schedule = match get("schedule") {
+            None => Some(None),
+            Some(value) => Schedule::parse(value).map(Some),
+        };
+        check(
+            schedule.is_some(),
+            "schedule",
+            "{ start: 'AAAA-MM-JJTHH:MM', finish: 'AAAA-MM-JJTHH:MM' }, l'arrivée après le départ | absent",
+        );
 
-        match (name, source, bbox, start, mode, profile, theme, overpass, video) {
+        let video = parse_video(get("video"), &mut issues);
+        match (name, source, bbox, start, mode, profile, theme, overpass, video, schedule) {
             (
                 Some(name),
                 Some(source),
@@ -189,6 +201,7 @@ impl Run {
                 Some(theme),
                 Some(overpass),
                 Some(video),
+                Some(schedule),
             ) if issues.is_empty() => Ok(Run {
                 name: name.to_owned(),
                 title: get("title").and_then(non_empty).map(|title| title.trim().to_owned()),
@@ -201,6 +214,7 @@ impl Run {
                 video,
                 overpass,
                 publication: parse_publication(get("publication")),
+                schedule,
             }),
             _ => Err(issues),
         }
@@ -336,6 +350,15 @@ mod tests {
         assert_eq!(run.title, None);
         assert_eq!(run.publication, None);
         assert_eq!(run.source.url, None);
+        assert_eq!(run.schedule, None);
+    }
+
+    #[test]
+    fn reads_the_schedule_and_flags_a_wrong_one() {
+        let run = Run::parse(&with("schedule", json!({ "start": "2026-07-24T21:00", "finish": "2026-07-25T06:15" })));
+        assert_eq!(run.unwrap().schedule.unwrap().finish.to_string(), "2026-07-25T06:15");
+        let wrong = with("schedule", json!({ "start": "2026-07-24T21:00", "finish": "hier" }));
+        assert_eq!(issue_paths(&wrong), ["schedule"]);
     }
 
     #[test]
