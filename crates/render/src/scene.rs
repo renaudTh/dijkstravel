@@ -25,6 +25,8 @@ pub struct Scene {
     /// Lieux dont l'image est introuvable : identifiant, adresse. Ils se dessinent sans.
     pub missing_images: Vec<(String, String)>,
     downloader: Downloader,
+    /// Largeur et hauteur à la place de celles du format du run (`video.format`).
+    size: Option<(u32, u32)>,
 }
 
 impl Scene {
@@ -36,12 +38,26 @@ impl Scene {
         }
         let images = downloader.place_images(places);
         let title = run.title.clone().unwrap_or_else(|| format!("{} lieux · {}", tour.stops.len(), run.name));
-        Scene { run, tour: Arc::new(tour), title, images: images.files, missing_images: images.missing, downloader }
+        Scene {
+            run,
+            tour: Arc::new(tour),
+            title,
+            images: images.files,
+            missing_images: images.missing,
+            downloader,
+            size: None,
+        }
+    }
+
+    /// Rend la scène en `width × height` pixels plutôt qu'au format du run. Le cadrage reste réglé pour un
+    /// petit côté de 1080 pixels : plus grand, la carte en montre plus, aux mêmes tailles de tracé et de textes.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.size = Some((width, height));
     }
 
     pub fn video(&self) -> Video {
         let video = &self.run.video;
-        let (width, height) = video.format.size();
+        let (width, height) = self.size.unwrap_or_else(|| video.format.size());
         Video {
             width,
             height,
