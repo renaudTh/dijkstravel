@@ -52,7 +52,7 @@ pub fn build_request(
     };
     let vehicle = match mode {
         TourMode::Loop => json!({ "id": 0, "profile": "car", "start_index": start_index, "end_index": start_index }),
-        TourMode::Open => json!({ "id": 0, "profile": "car", "start_index": start_index }),
+        TourMode::Open | TourMode::Ordered => json!({ "id": 0, "profile": "car", "start_index": start_index }),
     };
     let jobs: Vec<Value> = (0..job_count).map(|index| json!({ "id": index, "location_index": index })).collect();
     Ok(json!({ "vehicles": [vehicle], "jobs": jobs, "matrices": { "car": { "durations": durations } } }))

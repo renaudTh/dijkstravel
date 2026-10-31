@@ -73,25 +73,11 @@ pub fn solve_tour(run: &Run, places: &[Place], routing: &(impl Routing + ?Sized)
     let sub_matrix: DistanceMatrix =
         kept.iter().map(|&from| kept.iter().map(|&to| table.matrix[from][to]).collect()).collect();
 
-    let departure = if start_at.is_some() {
-        Departure::Index(reachable.len())
-    } else if let Some(place) = start_place {
-        Departure::Index(reachable.iter().position(|&i| i == place).expect("départ joignable"))
-    } else if run.mode == TourMode::Loop {
-        Departure::Index(0)
+    let ordered: Vec<&Place> = if run.mode == TourMode::Ordered {
+        reachable.iter().map(|&i| &places[i]).collect()
     } else {
-        Departure::None
+        optimized_order(run, places, &reachable, start_place, start_at.is_some(), &sub_matrix, routing)?
     };
-    let request = build_request(&sub_matrix, reachable.len(), departure, run.mode)?;
-    let order = parse_solution(&routing.optimize(&request)?, reachable.len())?;
-    let visits: Vec<usize> = order.iter().filter_map(|&job| reachable.get(job).copied()).collect();
-    // Le lieu de départ est visité en premier, même si VROOM l'a placé ailleurs à coût nul.
-    let origin = match departure {
-        Departure::Index(index) if start_at.is_none() => reachable.get(index).copied(),
-        _ => None,
-    };
-    let ordered: Vec<&Place> =
-        origin.into_iter().chain(visits.into_iter().filter(|&i| Some(i) != origin)).map(|i| &places[i]).collect();
     if ordered.is_empty() {
         return Err(SolveError::NoReachablePlace);
     }
@@ -103,6 +89,36 @@ pub fn solve_tour(run: &Run, places: &[Place], routing: &(impl Routing + ?Sized)
         routing.route(&waypoints)?
     };
     assemble_tour(run, start_at, &ordered, &route, excluded)
+}
+
+/// Ordre de visite des lieux joignables `reachable` le plus court selon VROOM, le lieu de départ en premier.
+fn optimized_order<'a>(
+    run: &Run,
+    places: &'a [Place],
+    reachable: &[usize],
+    start_place: Option<usize>,
+    starts_at_coordinates: bool,
+    sub_matrix: &DistanceMatrix,
+    routing: &(impl Routing + ?Sized),
+) -> Result<Vec<&'a Place>, SolveError> {
+    let departure = if starts_at_coordinates {
+        Departure::Index(reachable.len())
+    } else if let Some(place) = start_place {
+        Departure::Index(reachable.iter().position(|&i| i == place).expect("départ joignable"))
+    } else if run.mode == TourMode::Loop {
+        Departure::Index(0)
+    } else {
+        Departure::None
+    };
+    let request = build_request(sub_matrix, reachable.len(), departure, run.mode)?;
+    let order = parse_solution(&routing.optimize(&request)?, reachable.len())?;
+    let visits: Vec<usize> = order.iter().filter_map(|&job| reachable.get(job).copied()).collect();
+    // Le lieu de départ est visité en premier, même si VROOM l'a placé ailleurs à coût nul.
+    let origin = match departure {
+        Departure::Index(index) if !starts_at_coordinates => reachable.get(index).copied(),
+        _ => None,
+    };
+    Ok(origin.into_iter().chain(visits.into_iter().filter(|&i| Some(i) != origin)).map(|i| &places[i]).collect())
 }
 
 /// Indices des lieux injoignables depuis la majorité des autres, ou qui ne la rejoignent pas.
@@ -181,6 +197,8 @@ pub fn assemble_tour(
         excluded,
         ferries,
         transfers: Vec::new(),
+        stages: Vec::new(),
+        markers: Vec::new(),
         routed_meters: route.meters,
     })
 }
@@ -232,6 +250,8 @@ mod tests {
     struct FakeRouting {
         unreachable: Vec<LonLat>,
         snapped_away: Vec<LonLat>,
+        /// VROOM ne doit pas être appelé.
+        no_optimizer: bool,
     }
 
     impl Routing for FakeRouting {
@@ -267,6 +287,7 @@ mod tests {
         }
 
         fn optimize(&self, request: &Value) -> Result<Value, SolveError> {
+            assert!(!self.no_optimizer, "VROOM appelé");
             let start = &request["vehicles"][0]["start_index"];
             let jobs = request["jobs"].as_array().unwrap();
             let first = jobs.iter().filter(|job| job["location_index"] == *start);
@@ -391,6 +412,15 @@ mod tests {
         assert!(places.iter().any(|place| place.at == open.path.points[0]));
         let looped = solve_tour(&run(Value::Null, "loop"), &places, &FakeRouting::default()).unwrap();
         assert_eq!(looped.path.points.last(), Some(&looped.path.points[0]));
+    }
+
+    #[test]
+    fn keeps_the_file_order_of_an_ordered_tour() {
+        let routing = FakeRouting { no_optimizer: true, ..FakeRouting::default() };
+        let tour = solve_tour(&run(Value::Null, "ordered"), &[vannes(), brest(), rennes()], &routing).unwrap();
+        let ids: Vec<&str> = tour.stops.iter().map(|stop| stop.id.as_str()).collect();
+        assert_eq!(ids, [vannes().id, brest().id, rennes().id]);
+        assert_eq!(tour.path.points.first(), Some(&vannes().at));
     }
 
     #[test]

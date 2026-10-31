@@ -31,11 +31,21 @@ pub struct VideoSettings {
     pub intro_sec: f64,
     pub outro_sec: f64,
     pub fps: u32,
+    /// Sprints et ascensions de la tournée (`Tour::markers`) sur la carte : lisibles sur une étape, trop
+    /// nombreux pour une course entière en deux minutes.
+    pub markers: bool,
 }
 
 impl Default for VideoSettings {
     fn default() -> Self {
-        VideoSettings { format: VideoFormat::Landscape, duration_sec: 60.0, intro_sec: 3.0, outro_sec: 3.0, fps: 30 }
+        VideoSettings {
+            format: VideoFormat::Landscape,
+            duration_sec: 60.0,
+            intro_sec: 3.0,
+            outro_sec: 3.0,
+            fps: 30,
+            markers: true,
+        }
     }
 }
 
@@ -51,6 +61,8 @@ pub enum Start {
 pub enum TourMode {
     Loop,
     Open,
+    /// Les lieux dans l'ordre de `places.geojson`, sans optimisation : un itinéraire imposé (cortège…).
+    Ordered,
 }
 
 /// Profil de routage : chacun a son OSRM, avec ses propres données préparées (voir `docker-compose.yml`).
@@ -59,6 +71,8 @@ pub enum Profile {
     Car,
     Foot,
     Train,
+    /// Les rues d'une voiture, dans les deux sens : un cortège ignore les sens interdits.
+    Cortege,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,16 +147,18 @@ impl Run {
         let mode = match get("mode").and_then(Value::as_str) {
             Some("loop") => Some(TourMode::Loop),
             Some("open") => Some(TourMode::Open),
+            Some("ordered") => Some(TourMode::Ordered),
             _ => None,
         };
-        check(mode.is_some(), "mode", "'loop' | 'open'");
+        check(mode.is_some(), "mode", "'loop' | 'open' | 'ordered'");
         let profile = match get("profile").map(Value::as_str) {
             None | Some(Some("car")) => Some(Profile::Car),
             Some(Some("foot")) => Some(Profile::Foot),
             Some(Some("train")) => Some(Profile::Train),
+            Some(Some("cortege")) => Some(Profile::Cortege),
             Some(_) => None,
         };
-        check(profile.is_some(), "profile", "car | foot | train");
+        check(profile.is_some(), "profile", "car | foot | train | cortege");
         let theme = match get("theme") {
             None => Some("default"),
             Some(value) => value.as_str().filter(|name| is_theme_name(name)),
@@ -247,6 +263,13 @@ fn parse_video(raw: Option<&Value>, issues: &mut Vec<Issue>) -> Option<VideoSett
     let intro_sec = number("introSec", d.intro_sec, |n| n >= 0.0, "nombre >= 0");
     let outro_sec = number("outroSec", d.outro_sec, |n| n >= 0.0, "nombre >= 0");
     let fps = number("fps", f64::from(d.fps), |n| n > 0.0 && n.fract() == 0.0, "entier > 0");
+    let markers = match field(raw, "markers") {
+        None => d.markers,
+        Some(value) => value.as_bool().unwrap_or_else(|| {
+            issues.push(Issue::new("video.markers", "booléen"));
+            d.markers
+        }),
+    };
     let format = match field(raw, "format").map(Value::as_str) {
         None | Some(Some("16:9")) => VideoFormat::Landscape,
         Some(Some("9:16")) => VideoFormat::Portrait,
@@ -255,7 +278,14 @@ fn parse_video(raw: Option<&Value>, issues: &mut Vec<Issue>) -> Option<VideoSett
             VideoFormat::Landscape
         }
     };
-    (issues.len() == before).then_some(VideoSettings { format, duration_sec, intro_sec, outro_sec, fps: fps as u32 })
+    (issues.len() == before).then_some(VideoSettings {
+        format,
+        duration_sec,
+        intro_sec,
+        outro_sec,
+        fps: fps as u32,
+        markers,
+    })
 }
 
 /// Sans légende, pas de publication : les hashtags seuls ne servent à rien.
@@ -315,7 +345,7 @@ mod tests {
         raw["profile"] = json!("foot");
         raw["theme"] = json!("foot");
         raw["title"] = json!("  Les châteaux  ");
-        raw["video"] = json!({ "format": "9:16", "durationSec": 30, "fps": 25 });
+        raw["video"] = json!({ "format": "9:16", "durationSec": 30, "fps": 25, "markers": false });
         raw["overpass"] = json!({ "areaIso": "FR-BRE", "filter": "[\"historic\"=\"castle\"]" });
         raw["publication"] = json!({ "caption": "{lieux} châteaux", "hashtags": ["#bzh", 3] });
         let run = Run::parse(&raw).unwrap();
@@ -324,6 +354,7 @@ mod tests {
         assert_eq!(run.title.as_deref(), Some("Les châteaux"));
         assert_eq!(run.video.format.size(), (1080, 1920));
         assert_eq!((run.video.duration_sec, run.video.fps, run.video.intro_sec), (30.0, 25, 3.0));
+        assert!(!run.video.markers);
         assert_eq!(run.overpass.unwrap().area_iso, "FR-BRE");
         assert_eq!(run.publication.unwrap().hashtags, ["#bzh"]);
     }

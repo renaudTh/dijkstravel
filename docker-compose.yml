@@ -46,6 +46,19 @@ services:
       - ./data/osrm:/data
     ports:
       - '5002:5000'
+  # Rues d'une voiture sans sens interdits, profil maison profiles/cortege.lua, pour les runs
+  # `"profile": "cortege"` (manifestations). Villes de data/osrm/villes.json, extraites une par une
+  # (osmium extract -b <bbox> france-latest.osm.pbf), fusionnées (osmium merge) dans villes-cortege.osm.pbf :
+  #   osrm-extract -p /profiles/cortege.lua /data/villes-cortege.osm.pbf (./profiles sur /profiles)
+  osrm-cortege:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    command: >
+      osrm-routed --algorithm mld --max-table-size 10000 --max-viaroute-size 10000
+      /data/${OSRM_CORTEGE_EXTRACT:-villes-cortege}.osrm
+    volumes:
+      - ./data/osrm:/data
+    ports:
+      - '5003:5000'
   # VROOM ne reçoit que des matrices (D-4) : il n'appelle jamais OSRM.
   vroom:
     image: ghcr.io/vroom-project/vroom-docker:latest

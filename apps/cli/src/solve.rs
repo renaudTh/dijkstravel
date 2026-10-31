@@ -1,5 +1,5 @@
 //! `dijkstravel solve runs/<nom>` → `runs/<nom>/tour.json`. Seul lecteur de `OSRM_URL`, `OSRM_FOOT_URL`,
-//! `OSRM_TRAIN_URL` et `VROOM_URL`.
+//! `OSRM_TRAIN_URL`, `OSRM_CORTEGE_URL` et `VROOM_URL`.
 
 use std::path::Path;
 
@@ -15,6 +15,7 @@ fn osrm_url(profile: Profile) -> String {
         Profile::Car => ("OSRM_URL", "http://localhost:5000"),
         Profile::Foot => ("OSRM_FOOT_URL", "http://localhost:5001"),
         Profile::Train => ("OSRM_TRAIN_URL", "http://localhost:5002"),
+        Profile::Cortege => ("OSRM_CORTEGE_URL", "http://localhost:5003"),
     };
     std::env::var(variable).unwrap_or_else(|_| fallback.to_owned())
 }
