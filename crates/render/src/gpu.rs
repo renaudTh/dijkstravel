@@ -9,12 +9,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
-use skia_safe::{AlphaType, ColorType, Image, ImageInfo};
+use skia_safe::{AlphaType, Canvas, ColorType, Image, ImageInfo};
 
 use crate::cache::Lru;
 use crate::mesh::{self, Vertex};
 
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// L'image rendue, dans l'ordre des octets du canevas de Skia (N32 : BGRA) : relue, elle s'y recopie
+/// ligne à ligne sans conversion.
+const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Textures de morceaux gardées en mémoire vidéo : 1,4 Mo chacune avec leurs mipmaps.
 const TEXTURES: usize = 768;
@@ -72,10 +75,9 @@ pub struct ChunkDraw<'a> {
     pub transfer_image: &'a dyn Fn() -> Option<Image>,
 }
 
-/// L'image rendue et sa profondeur (0 au plan proche, 1 au lointain ou dans le ciel), ligne par ligne,
-/// à `depth_size` : la même vue, en moins de pixels pour une grande image (`depth_size`).
+/// La profondeur de l'image rendue (0 au plan proche, 1 au lointain ou dans le ciel), ligne par ligne, à
+/// `depth_size` : la même vue, en moins de pixels pour une grande image (`depth_size`).
 pub struct Rendered {
-    pub image: Image,
     pub depth: Vec<f32>,
     pub depth_size: [u32; 2],
 }
@@ -235,7 +237,7 @@ impl Gpu {
             immediate_size: 0,
         });
         let color_target =
-            [Some(wgpu::ColorTargetState { format: COLOR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
+            [Some(wgpu::ColorTargetState { format: TARGET_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
         let pipeline = |vertex: &str,
                         fragment: Option<&str>,
                         buffers: &[Option<wgpu::VertexBufferLayout>],
@@ -333,7 +335,8 @@ impl Gpu {
     }
 
     /// Ciel puis morceaux, relus en mémoire.
-    pub fn render(&self, settings: &FrameSettings, chunks: &[ChunkDraw]) -> Rendered {
+    /// L'image se dessine dans `canvas`, qu'elle recouvre ; la profondeur est rendue.
+    pub fn render(&self, settings: &FrameSettings, chunks: &[ChunkDraw], canvas: &Canvas) -> Rendered {
         let device = &self.device;
         let frame = FrameUniform {
             view_projection: settings.view_projection,
@@ -491,10 +494,9 @@ impl Gpu {
         // Cette image seulement : les autres threads soumettent les leurs pendant ce temps.
         device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: None }).expect("GPU du relief");
         let row = row as usize;
-        // Une seule copie par tampon : l'image garde ses lignes alignées, la profondeur est relue en
-        // flottants, sans passer par des octets intermédiaires.
+        // Une seule copie par tampon : l'image droit dans le canevas, la profondeur en flottants.
         let mapped = readback.color.get_mapped_range(..).expect("relecture du relief");
-        let pixels = skia_safe::Data::new_copy(&mapped[..row * height as usize]);
+        paint(canvas, &mapped[..row * height as usize], row, width, height);
         drop(mapped);
         readback.color.unmap();
         let mapped = readback.depth.get_mapped_range(..).expect("relecture du relief");
@@ -505,9 +507,7 @@ impl Gpu {
         drop(mapped);
         readback.depth.unmap();
         drop(readback);
-        let info = ImageInfo::new((width as i32, height as i32), ColorType::RGBA8888, AlphaType::Premul, None);
-        let image = skia_safe::images::raster_from_data(&info, pixels, row).expect("image du relief");
-        Rendered { image, depth, depth_size: [depth_width, depth_height] }
+        Rendered { depth, depth_size: [depth_width, depth_height] }
     }
 
     /// Des tampons de relecture libres, sinon les suivants à tour de rôle dès qu'ils se libèrent.
@@ -648,12 +648,32 @@ impl Targets {
         };
         let target = |label: &str, format, sample_count| sized([width, height], label, format, sample_count);
         Targets {
-            samples: target("échantillons", COLOR_FORMAT, SAMPLES),
+            samples: target("échantillons", TARGET_FORMAT, SAMPLES),
             samples_depth: target("profondeur des échantillons", DEPTH_FORMAT, SAMPLES),
-            color: target("image", COLOR_FORMAT, 1),
+            color: target("image", TARGET_FORMAT, 1),
             // La passe de profondeur se rend à sa propre taille : même vue, moins de pixels.
             depth: sized(depth_size(width, height), "profondeur", DEPTH_FORMAT, 1),
         }
+    }
+}
+
+/// Pose l'image relue (BGRA, lignes de `row` octets) dans `canvas` : recopiée ligne à ligne dans ses
+/// pixels quand il en a de même format, sinon dessinée.
+fn paint(canvas: &Canvas, bytes: &[u8], row: usize, width: u32, height: u32) {
+    let tight = width as usize * 4;
+    if let Some(target) = canvas.access_top_layer_pixels()
+        && target.info.color_type() == ColorType::BGRA8888
+        && target.info.width() == width as i32
+        && target.info.height() == height as i32
+    {
+        for (line, out) in bytes.chunks(row).zip(target.pixels.chunks_mut(target.row_bytes)) {
+            out[..tight].copy_from_slice(&line[..tight]);
+        }
+        return;
+    }
+    let info = ImageInfo::new((width as i32, height as i32), ColorType::BGRA8888, AlphaType::Premul, None);
+    if let Some(image) = skia_safe::images::raster_from_data(&info, skia_safe::Data::new_copy(bytes), row) {
+        canvas.draw_image(&image, (0, 0), None);
     }
 }
 
@@ -761,8 +781,10 @@ mod tests {
             image: &image,
             transfer_image: &none,
         };
-        let rendered = gpu.render(&settings, &[chunk]);
-        let pixel = |x: i32, y: i32| rendered.image.peek_pixels().unwrap().get_color((x, y));
+        let mut surface = surfaces::raster_n32_premul((width as i32, height as i32)).unwrap();
+        let rendered = gpu.render(&settings, &[chunk], surface.canvas());
+        let image = surface.image_snapshot();
+        let pixel = |x: i32, y: i32| image.peek_pixels().unwrap().get_color((x, y));
         assert_eq!(pixel(135, 240), Color::RED);
         assert_eq!(pixel(135, 0), Color::BLUE);
         let depth = |x: usize, y: usize| rendered.depth[y * rendered.depth_size[0] as usize + x];

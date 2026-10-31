@@ -103,8 +103,14 @@ impl Terrain3d {
         chunks.iter().flat_map(|&key| atlas.tiles_of(key).into_iter().chain(self.meshes.tiles_of(key))).collect()
     }
 
-    /// Ciel et relief de l'image ; `transfer` : le fond des transferts et sa part.
-    pub fn render(&self, atlas: &Atlas, transfer: Option<(&Atlas, f64)>, perspective: &Perspective) -> Rendered {
+    /// Ciel et relief de l'image, dessinés dans `canvas` ; `transfer` : le fond des transferts et sa part.
+    pub fn render(
+        &self,
+        atlas: &Atlas,
+        transfer: Option<(&Atlas, f64)>,
+        perspective: &Perspective,
+        canvas: &skia_safe::Canvas,
+    ) -> Rendered {
         let chunks = self.chunks(atlas, perspective);
         let transfer = transfer.filter(|(_, blend)| *blend > 0.0);
         let side = f64::from(CHUNK + 2 * APRON);
@@ -144,7 +150,7 @@ impl Terrain3d {
                 }
             })
             .collect();
-        self.gpu.render(&settings, &draws)
+        self.gpu.render(&settings, &draws, canvas)
     }
 
     /// La projection du tracé et des lieux sur le relief rendu ; `lift` : demi-largeur du tracé, en pixels de
