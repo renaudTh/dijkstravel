@@ -1,12 +1,13 @@
 //! `dijkstravel render runs/<nom>` → `data/out/<nom>/video.mp4`, par le moteur natif (sans GPU), à
 //! partir du seul `tour.json`. Tout ce que lit le moteur est téléchargé avant, dans `data/cache/`.
-//! `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4` ; `--stop-slowdown n`
+//! La vue est à plat ; `--3d` la rend en relief, caméra inclinée, dans `video-3d.mp4`. `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4` ; `--stop-slowdown n`
 //! une variante qui freine autant aux lieux, dans `video-ralenti-<n>.mp4`. Un dossier qui contient
 //! `montage.json` se rend comme un montage (`montage.rs`).
 
 use std::path::{Path, PathBuf};
 
 use dijkstravel_core::run::Run;
+use dijkstravel_core::theme::Theme;
 use dijkstravel_render::download::Downloader;
 use dijkstravel_render::render::{Image, encode};
 use dijkstravel_render::scene::Scene;
@@ -16,6 +17,8 @@ use crate::load::{self, Outcome, RunPaths, fail};
 use crate::montage;
 
 pub const CACHE_DIR: &str = "data/cache";
+/// Inclinaison de `--3d` quand le thème n'en donne pas.
+const RELIEF_PITCH: f64 = 55.0;
 
 /// La scène du run, depuis ses fichiers ; les images de lieux introuvables sont signalées.
 pub fn scene(arg: &Path) -> Outcome<(Scene, RunPaths)> {
@@ -56,25 +59,47 @@ pub struct Variant {
     pub duration: Option<f64>,
     /// À la place de `camera.stopSlowdown` du thème.
     pub stop_slowdown: Option<f64>,
+    /// En relief : sinon la caméra reste à plat, quel que soit `camera.pitch` du thème.
+    pub relief: bool,
 }
 
 impl Variant {
-    /// Les options de `render` qui la produisent, ` --duration 60 --stop-slowdown 2`.
+    /// Les options de `render` qui la produisent, ` --duration 60 --stop-slowdown 2 --3d`.
     pub fn options(&self) -> String {
         let duration = self.duration.map(|duration| format!(" --duration {duration}"));
         let slowdown = self.stop_slowdown.map(|slowdown| format!(" --stop-slowdown {slowdown}"));
-        duration.unwrap_or_default() + &slowdown.unwrap_or_default()
+        let relief = if self.relief { " --3d" } else { "" };
+        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + relief
+    }
+
+    /// Le thème avec les réglages forcés.
+    pub fn apply(&self, theme: &mut Theme) {
+        if let Some(slowdown) = self.stop_slowdown {
+            theme.camera.stop_slowdown = slowdown;
+        }
+        theme.camera.pitch = match (self.relief, theme.camera.pitch) {
+            (false, _) => 0.0,
+            (true, pitch) if pitch > 0.0 => pitch,
+            (true, _) => RELIEF_PITCH,
+        };
+    }
+
+    /// Suffixe des fichiers rendus, `-60s-ralenti-2-3d`.
+    fn suffix(&self) -> String {
+        let duration = self.duration.map(|duration| format!("-{duration}s"));
+        let slowdown = self.stop_slowdown.map(|slowdown| format!("-ralenti-{slowdown}"));
+        let relief = if self.relief { "-3d" } else { "" };
+        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + relief
     }
 }
 
-/// `video.mp4`, ou la variante `video-<n>s-ralenti-<m>.mp4` d'une durée et d'un ralentissement forcés.
+/// `video.mp4`, ou la variante `video-<n>s-ralenti-<m>-3d.mp4` d'une durée, d'un ralentissement ou d'un
+/// relief forcés.
 pub fn video_file(paths: &RunPaths, variant: Variant) -> PathBuf {
-    if variant.duration.is_none() && variant.stop_slowdown.is_none() {
-        return paths.video.clone();
+    match variant.suffix() {
+        suffix if suffix.is_empty() => paths.video.clone(),
+        suffix => paths.out.join(format!("video{suffix}.mp4")),
     }
-    let duration = variant.duration.map(|duration| format!("-{duration}s"));
-    let slowdown = variant.stop_slowdown.map(|slowdown| format!("-ralenti-{slowdown}"));
-    paths.out.join(format!("video{}{}.mp4", duration.unwrap_or_default(), slowdown.unwrap_or_default()))
 }
 
 pub fn console(scene: &Scene) -> Console {
@@ -103,23 +128,21 @@ pub fn main(
         return fail("--stop-slowdown attend un nombre de 0 à 5");
     }
     if montage::is_montage(arg) {
-        if variant.duration.is_some() || variant.stop_slowdown.is_some() {
+        if variant.duration.is_some() || variant.stop_slowdown.is_some() || variant.relief {
             return fail(
-                "--duration et --stop-slowdown ne s'appliquent pas à un montage : régler chaque segment et son thème",
+                "--duration, --stop-slowdown et --3d ne s'appliquent pas à un montage : régler chaque segment et son thème",
             );
         }
         return montage::render(arg, seconds, threads, frame.map(|(frame, _)| frame));
     }
     let (scene, paths) = scene_lasting(arg, variant.duration)?;
     let mut theme = load::theme(&scene.run)?;
-    if let Some(slowdown) = variant.stop_slowdown {
-        theme.camera.stop_slowdown = slowdown;
-    }
+    variant.apply(&mut theme);
     let renderer = scene.renderer(theme, None)?;
     std::fs::create_dir_all(&paths.out)?;
     let console = console(&scene);
     if let Some((frame, with_hud)) = frame {
-        let out = paths.out.join(format!("frame-{frame}.png"));
+        let out = paths.out.join(format!("frame-{frame}{}.png", if variant.relief { "-3d" } else { "" }));
         write_image(&scene.still(&renderer, frame, with_hud, &console)?, &out)?;
         println!("{}", out.display());
         return Ok(());

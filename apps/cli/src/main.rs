@@ -55,6 +55,9 @@ enum Command {
         /// Avec `--frame` : sans la carte d'infos (vignettes, couvertures composées à la main).
         #[arg(long, requires = "frame")]
         no_hud: bool,
+        /// En relief, caméra inclinée (`camera.pitch` du thème, 55° s'il n'en a pas) ; écrit `video-3d.mp4`.
+        #[arg(long = "3d")]
+        relief: bool,
     },
     /// Légende prête à coller (`publication.txt`) et couverture (`cover.jpg`) du run.
     Publication { run: PathBuf },
@@ -70,6 +73,9 @@ enum Command {
         /// Envoie la variante rendue avec `render --stop-slowdown n`.
         #[arg(long)]
         stop_slowdown: Option<f64>,
+        /// Envoie la variante en relief (`render --3d`).
+        #[arg(long = "3d")]
+        relief: bool,
     },
     /// Éditeur du thème du run, sur sa tournée déjà calculée, dans le navigateur.
     Editor { run: PathBuf },
@@ -86,17 +92,17 @@ fn main() -> ExitCode {
     let outcome = match Cli::parse().command {
         Command::Validate { run } => validate(&run),
         Command::Solve { run } => solve::main(&run),
-        Command::Render { run, seconds, duration, stop_slowdown, threads, frame, no_hud } => render::main(
+        Command::Render { run, seconds, duration, stop_slowdown, threads, frame, no_hud, relief } => render::main(
             &run,
             seconds,
-            render::Variant { duration, stop_slowdown },
+            render::Variant { duration, stop_slowdown, relief },
             threads,
             frame.map(|frame| (frame, !no_hud)),
         ),
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
-        Command::Upload { run, duration, stop_slowdown } => {
-            upload::main(&run, render::Variant { duration, stop_slowdown })
+        Command::Upload { run, duration, stop_slowdown, relief } => {
+            upload::main(&run, render::Variant { duration, stop_slowdown, relief })
         }
         Command::Editor { run } => editor::main(&run),
     };

@@ -37,7 +37,9 @@ pub fn render(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: O
         return Err(Failure(problems));
     }
     // Le thème du montage, lu une fois : chaque scène porte déjà son nom.
-    let theme = load::theme(&scenes[0].run)?;
+    let mut theme = load::theme(&scenes[0].run)?;
+    // Le montage reste à plat.
+    theme.camera.pitch = 0.0;
     let parts = scenes.iter().map(|scene| scene.renderer(theme.clone(), None)).collect::<Result<Vec<_>, _>>()?;
     // En vue d'avion, chaque ville au début de son tracé.
     let cities = montage
