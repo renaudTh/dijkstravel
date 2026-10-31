@@ -6,7 +6,7 @@
 //! la distance de la caméra est choisie pour qu'un pixel monde y fasse un pixel d'écran.
 
 use glam::dcamera::rh::{proj, view};
-use glam::{DMat4, DVec3, DVec4};
+use glam::{DMat4, DVec2, DVec3, DVec4};
 
 use crate::frame::Camera;
 use crate::geo::LonLat;
@@ -25,6 +25,9 @@ const NEAR: f64 = 0.01;
 const EARTH_CIRCUMFERENCE: f64 = 40_075_016.686;
 /// Points cherchés sur chaque bord de l'écran pour l'emprise au sol.
 const EDGE_SAMPLES: usize = 8;
+/// Hauteur du relief au-dessus du point visé que l'emprise prend en compte, en mètres : un sommet proche
+/// se voit en bas de l'écran avant que son pied n'y entre.
+const RELIEF_ABOVE: f64 = 2500.0;
 
 pub struct Perspective {
     camera: Camera,
@@ -67,7 +70,9 @@ impl Perspective {
         let max_ground = eye.z * top_ray.tan();
         let fog = fog_range(pitch, max_ground);
         // Jusqu'au bout du brouillard : un relief plus haut que le point visé se voit au-delà du sol plat.
-        let far = (fog[1].hypot(eye.z) + distance) * 1.01;
+        // Jusqu'au niveau de la mer : une vallée plus basse que le point visé se voit au-delà.
+        let z_per_meter = exaggeration / meters_per_pixel;
+        let far = (fog[1].hypot(eye.z + ground.max(0.0) * z_per_meter) + distance) * 1.01;
         let view = view::look_at_mat4(eye, DVec3::ZERO, forward * pitch.cos() + DVec3::Z * pitch.sin());
         let projection = proj::directx::perspective(FOV_Y, width / height, distance * NEAR, far);
         let view_projection = projection * view;
@@ -77,7 +82,7 @@ impl Perspective {
             height,
             target,
             ground,
-            z_per_meter: exaggeration / meters_per_pixel,
+            z_per_meter,
             distance,
             max_ground,
             fog,
@@ -119,10 +124,20 @@ impl Perspective {
         Some(self.to_lon_lat(hit))
     }
 
-    /// Emprise au sol de l'image : le contour de l'écran projeté sur le sol, coupé au bout du brouillard (un relief
-    /// plus haut que le point visé se voit au-delà du sol plat).
+    /// Emprise au sol de l'image, polygone convexe : le contour de l'écran projeté sur le plus bas et le plus
+    /// haut relief possibles (le niveau de la mer, `RELIEF_ABOVE` au-dessus du point visé), coupé au bout du
+    /// brouillard. Plus bas que le point visé, une vallée se voit au-delà du sol plat ; plus haut, un
+    /// sommet se voit en deçà.
     /// Sert à choisir les morceaux d'atlas et les tuiles de relief.
     pub fn ground_footprint(&self) -> Vec<LonLat> {
+        let low = -self.ground.max(0.0) * self.z_per_meter;
+        let high = (RELIEF_ABOVE * self.z_per_meter).min(self.eye.z * 0.5);
+        let points: Vec<DVec2> = [low, high].into_iter().flat_map(|z| self.outline_at(z)).collect();
+        convex_hull(points).into_iter().map(|p| self.to_lon_lat(p.extend(0.0))).collect()
+    }
+
+    /// Le contour de l'écran projeté sur le plan horizontal `z`, coupé au bout du brouillard.
+    fn outline_at(&self, z: f64) -> Vec<DVec2> {
         let (w, h) = (self.width, self.height);
         let n = EDGE_SAMPLES as f64;
         let border = (0..EDGE_SAMPLES)
@@ -135,15 +150,16 @@ impl Perspective {
             .map(|pixel| {
                 let direction = self.ray(pixel);
                 let horizontal = direction.truncate();
-                // Le rayon touche le sol devant la caméra et assez près : ce point ; sinon, le plus loin
+                // Le rayon touche le plan devant la caméra et assez près : ce point ; sinon, le plus loin
                 // dessiné dans sa direction (le bord du brouillard).
                 let reach = self.fog[1];
-                let hit = self.ground_hit(pixel).filter(|hit| (hit.truncate() - eye).length() <= reach);
-                let point = hit.unwrap_or_else(|| {
+                let hit = (direction.z < -1e-9)
+                    .then(|| (self.eye + direction * ((z - self.eye.z) / direction.z)).truncate())
+                    .filter(|hit| (*hit - eye).length() <= reach);
+                hit.unwrap_or_else(|| {
                     let along = if horizontal.length() > 1e-12 { horizontal.normalize() } else { horizontal };
-                    (eye + along * reach).extend(0.0)
-                });
-                self.to_lon_lat(point)
+                    eye + along * reach
+                })
             })
             .collect()
     }
@@ -252,6 +268,29 @@ impl Projection for Perspective {
     }
 }
 
+/// Enveloppe convexe, dans le sens trigonométrique (chaîne monotone d'Andrew).
+fn convex_hull(mut points: Vec<DVec2>) -> Vec<DVec2> {
+    points.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    points.dedup();
+    if points.len() < 3 {
+        return points;
+    }
+    let turn = |o: DVec2, a: DVec2, b: DVec2| (a - o).perp_dot(b - o);
+    let mut hull: Vec<DVec2> = Vec::with_capacity(points.len() * 2);
+    let reversed: Vec<DVec2> = points.iter().rev().copied().collect();
+    for pass in [&points, &reversed] {
+        let start = hull.len();
+        for &p in pass {
+            while hull.len() >= start + 2 && turn(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
+                hull.pop();
+            }
+            hull.push(p);
+        }
+        hull.pop();
+    }
+    hull
+}
+
 /// Distances au sol (pixels monde, depuis l'aplomb de la caméra) où le brouillard commence et où il
 /// recouvre tout : rien à plat, une brume vers l'horizon quand la caméra le voit.
 fn fog_range(pitch: f64, max_ground: f64) -> [f64; 2] {
@@ -317,6 +356,12 @@ mod tests {
         assert!(north(tilted.ground_footprint()) > north(flat.ground_footprint()));
         // À 70°, le haut de l'écran voit le ciel : pas de sol sous ce pixel.
         assert!(tilted.ground_at([540.0, 0.0]).is_none());
-        assert_eq!(flat.ground_footprint().len(), 4 * EDGE_SAMPLES);
+        // Vue à plat d'un point à 1000 m : le relief plus bas et plus haut élargit l'emprise.
+        let high = Perspective::new(camera(0.0, 0.0), 1080, 1920, 1000.0, 1.0);
+        let span = |footprint: Vec<LonLat>| {
+            let lats = footprint.iter().map(|p| p[1]);
+            lats.clone().fold(f64::MIN, f64::max) - lats.fold(f64::MAX, f64::min)
+        };
+        assert!(span(high.ground_footprint()) > span(flat.ground_footprint()));
     }
 }
