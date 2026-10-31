@@ -76,6 +76,8 @@ pub struct StopsTheme {
     pub show_localities: bool,
     /// Noms des sprints et ascensions (`Tour::markers`), en pixels ; leur point grandit avec.
     pub marker_label_size: f64,
+    /// Rayon du point des repères, en pixels ; 0 : en proportion de leur nom.
+    pub marker_radius: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,7 +172,7 @@ pub const SEA_IMAGERIES: [&str; 4] = ["", "nasa", "ign", "sentinel"];
 pub const HUD_FONTS: [&str; 6] = ["Nunito", "Quicksand", "Fredoka", "Baloo 2", "Poppins", "Comfortaa"];
 
 /// Bornes des réglages numériques, partagées par la validation et les curseurs de l'éditeur.
-pub const NUMBER_RANGES: [(&str, f64, f64); 28] = [
+pub const NUMBER_RANGES: [(&str, f64, f64); 29] = [
     ("route.width", 2.0, 40.0),
     ("route.coreRatio", 0.0, 1.0),
     ("route.coreBlurRatio", 0.0, 1.0),
@@ -182,6 +184,7 @@ pub const NUMBER_RANGES: [(&str, f64, f64); 28] = [
     ("stops.imageSize", 24.0, 200.0),
     ("stops.labelSize", 12.0, 60.0),
     ("stops.markerLabelSize", 12.0, 60.0),
+    ("stops.markerRadius", 0.0, 30.0),
     ("basemap.brightness", 0.0, 1.0),
     ("basemap.contrast", -1.0, 1.0),
     ("basemap.saturation", -1.0, 1.0),
@@ -237,6 +240,7 @@ impl Default for Theme {
                 label_size: 28.0,
                 show_localities: false,
                 marker_label_size: 21.0,
+                marker_radius: 0.0,
             },
             basemap: BasemapTheme {
                 imagery: s("nasa"),
@@ -392,6 +396,7 @@ impl Theme {
                 label_size: r.number("stops.labelSize", d.stops.label_size),
                 show_localities: r.flag("stops.showLocalities", d.stops.show_localities),
                 marker_label_size: r.number("stops.markerLabelSize", d.stops.marker_label_size),
+                marker_radius: r.number("stops.markerRadius", d.stops.marker_radius),
             },
             basemap: BasemapTheme {
                 imagery: r.choice("basemap.imagery", &d.basemap.imagery, &IMAGERIES),

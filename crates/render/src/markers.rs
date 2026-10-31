@@ -48,7 +48,11 @@ impl Markers {
         view_at: impl Fn(f64) -> P,
         width: f32,
     ) -> Self {
-        let radius = (theme.stops.marker_label_size * RADIUS_PER_LABEL) as f32;
+        let radius = if theme.stops.marker_radius > 0.0 {
+            theme.stops.marker_radius
+        } else {
+            theme.stops.marker_label_size * RADIUS_PER_LABEL
+        } as f32;
         let text = parse_color(&theme.hud.text_color);
         let halo = parse_color(&theme.hud.background);
         let size = theme.stops.marker_label_size as f32;

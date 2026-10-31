@@ -102,6 +102,7 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'checkbox', path: 'stops.showLocalities', label: 'Nom des localités traversées' },
       { kind: 'range', path: 'stops.labelSize', label: 'Taille des noms (px)', step: 1 },
       { kind: 'range', path: 'stops.markerLabelSize', label: 'Taille des sprints et ascensions (px)', step: 1 },
+      { kind: 'range', path: 'stops.markerRadius', label: 'Rayon de leur point (px, 0 : selon la taille)', step: 0.5 },
     ],
   },
   {
