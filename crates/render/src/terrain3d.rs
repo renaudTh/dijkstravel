@@ -22,6 +22,9 @@ use crate::perspective::Perspective;
 
 /// Niveaux d'atlas au plus au-dessus de celui de la caméra, pour les morceaux lointains.
 const EXTRA_LEVELS: u32 = 6;
+/// Morceaux au plus par image : au-delà, ceux d'une même image ne tiendraient plus ensemble dans les
+/// textures gardées en mémoire vidéo (768), et chaque image en cours de dessin garde les siens.
+const MAX_CHUNKS: usize = 600;
 /// Ciel et brume, avant le voile du thème.
 const SKY: &str = "#7fa9d6";
 const HAZE: &str = "#dfe8f0";
@@ -309,7 +312,21 @@ impl Projection for OnRelief<'_> {
 /// Morceaux à dessiner : chacun au niveau le plus grossier dont les pixels ne grossissent pas à l'écran,
 /// d'autant plus grossier qu'il est loin, à partir de `base` (le niveau de la caméra) ; les niveaux
 /// s'emboîtent sans se chevaucher. Du plus proche au plus loin : le GPU écarte tôt ce qui est caché.
+/// Au-delà de `MAX_CHUNKS` (caméra presque un niveau en retrait du sien, vue rasante sur un relief haut,
+/// en 4K), les niveaux grossissent d'un demi-niveau à la fois : d'abord au loin, puis jusqu'au premier plan.
 fn select_chunks(perspective: &Perspective, travel_zoom: f64, base: u32) -> Vec<ChunkKey> {
+    let mut coarsen = 0.0;
+    loop {
+        let chunks = select_chunks_coarsened(perspective, travel_zoom, base, coarsen);
+        if chunks.len() <= MAX_CHUNKS || coarsen >= f64::from(EXTRA_LEVELS) {
+            return chunks;
+        }
+        coarsen += 0.5;
+    }
+}
+
+/// `coarsen` : niveaux ajoutés à ceux que demande la distance.
+fn select_chunks_coarsened(perspective: &Perspective, travel_zoom: f64, base: u32, coarsen: f64) -> Vec<ChunkKey> {
     let camera = perspective.camera();
     let top = (base + EXTRA_LEVELS).min((travel_zoom - 1.0).floor().max(0.0) as u32).max(base);
     let footprint: Vec<DVec2> = perspective
@@ -339,7 +356,7 @@ fn select_chunks(perspective: &Perspective, travel_zoom: f64, base: u32) -> Vec<
         // Le plus fin des niveaux voulus sur le morceau : à son point le plus proche de la caméra.
         let nearest = rect.nearest(eye.truncate());
         let reach = (nearest - eye.truncate()).length().hypot(eye.z);
-        let wanted = base + (reach / distance).max(1.0).log2().floor() as u32;
+        let wanted = base + ((reach / distance).max(1.0).log2() + coarsen).floor() as u32;
         if key.level > wanted && key.level > base {
             let (x, y) = (key.x * 2, key.y * 2);
             for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
@@ -427,6 +444,20 @@ fn hash(value: impl Hash) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Au départ d'un parcours court en haute montagne, en 4K paysage : la caméra, presque un niveau en
+    /// retrait du sien, verrait plus de morceaux que la mémoire vidéo n'en garde.
+    #[test]
+    fn a_crowded_view_coarsens_to_the_chunk_budget() {
+        let travel_zoom = 17.0;
+        let camera = Camera { pitch: 39.3, bearing: 300.0, ..Camera::flat([5.98, 45.2], 16.07) };
+        let perspective = Perspective::new(camera, 3840, 2160, 2612.0, 1.3);
+        assert!(select_chunks_coarsened(&perspective, travel_zoom, 0, 0.0).len() > MAX_CHUNKS);
+        let chunks = select_chunks(&perspective, travel_zoom, 0);
+        assert!(chunks.len() <= MAX_CHUNKS, "{} morceaux", chunks.len());
+        // Au premier plan, le niveau 1 (zoom 16) a encore un pixel d'imagerie par pixel de l'image (zoom 16,07).
+        assert!(chunks[0].level <= 1);
+    }
 
     /// Une caméra inclinée sur l'étape : des morceaux fins près d'elle, sans qu'aucun en recouvre un autre.
     #[test]
