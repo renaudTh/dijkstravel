@@ -1,7 +1,8 @@
 //! `dijkstravel render runs/<nom>` → `data/out/<nom>/video.mp4`, par le moteur natif (sans GPU), à
 //! partir du seul `tour.json`. Tout ce que lit le moteur est téléchargé avant, dans `data/cache/`.
-//! `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4`. Un dossier qui
-//! contient `montage.json` se rend comme un montage (`montage.rs`).
+//! `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4` ; `--stop-slowdown n`
+//! une variante qui freine autant aux lieux, dans `video-ralenti-<n>.mp4`. Un dossier qui contient
+//! `montage.json` se rend comme un montage (`montage.rs`).
 
 use std::path::{Path, PathBuf};
 
@@ -48,9 +49,32 @@ pub fn scene_of(run: Run, paths: &RunPaths, arg: &Path) -> Outcome<Scene> {
     Ok(scene)
 }
 
-/// `video.mp4`, ou la variante `video-<n>s.mp4` d'une durée de trajet forcée.
-pub fn video_file(paths: &RunPaths, duration: Option<f64>) -> PathBuf {
-    duration.map_or_else(|| paths.video.clone(), |duration| paths.out.join(format!("video-{duration}s.mp4")))
+/// Réglages du run ou du thème forcés pour un rendu, sans toucher leurs fichiers.
+#[derive(Clone, Copy)]
+pub struct Variant {
+    /// À la place de `durationSec` du run.
+    pub duration: Option<f64>,
+    /// À la place de `camera.stopSlowdown` du thème.
+    pub stop_slowdown: Option<f64>,
+}
+
+impl Variant {
+    /// Les options de `render` qui la produisent, ` --duration 60 --stop-slowdown 2`.
+    pub fn options(&self) -> String {
+        let duration = self.duration.map(|duration| format!(" --duration {duration}"));
+        let slowdown = self.stop_slowdown.map(|slowdown| format!(" --stop-slowdown {slowdown}"));
+        duration.unwrap_or_default() + &slowdown.unwrap_or_default()
+    }
+}
+
+/// `video.mp4`, ou la variante `video-<n>s-ralenti-<m>.mp4` d'une durée et d'un ralentissement forcés.
+pub fn video_file(paths: &RunPaths, variant: Variant) -> PathBuf {
+    if variant.duration.is_none() && variant.stop_slowdown.is_none() {
+        return paths.video.clone();
+    }
+    let duration = variant.duration.map(|duration| format!("-{duration}s"));
+    let slowdown = variant.stop_slowdown.map(|slowdown| format!("-ralenti-{slowdown}"));
+    paths.out.join(format!("video{}{}.mp4", duration.unwrap_or_default(), slowdown.unwrap_or_default()))
 }
 
 pub fn console(scene: &Scene) -> Console {
@@ -63,35 +87,45 @@ pub fn write_image(image: &Image, out: &Path) -> Outcome {
     load::write_file(out, bytes)
 }
 
+/// `frame` : l'image seule, et si elle porte la carte d'infos.
 pub fn main(
     arg: &Path,
     seconds: Option<f64>,
-    duration: Option<f64>,
+    variant: Variant,
     threads: Option<usize>,
-    frame: Option<u32>,
+    frame: Option<(u32, bool)>,
 ) -> Outcome {
     let positive = |value: Option<f64>| value.is_none_or(|value| value.is_finite() && value > 0.0);
-    if !positive(seconds) || !positive(duration) || threads == Some(0) {
+    if !positive(seconds) || !positive(variant.duration) || threads == Some(0) {
         return fail("--seconds et --duration attendent un nombre > 0, --threads un entier > 0");
     }
-    if montage::is_montage(arg) {
-        if duration.is_some() {
-            return fail("--duration ne s'applique pas à un montage : régler durationSec de chaque segment");
-        }
-        return montage::render(arg, seconds, threads, frame);
+    if variant.stop_slowdown.is_some_and(|slowdown| !(0.0..=5.0).contains(&slowdown)) {
+        return fail("--stop-slowdown attend un nombre de 0 à 5");
     }
-    let (scene, paths) = scene_lasting(arg, duration)?;
-    let renderer = scene.renderer(load::theme(&scene.run)?, None)?;
+    if montage::is_montage(arg) {
+        if variant.duration.is_some() || variant.stop_slowdown.is_some() {
+            return fail(
+                "--duration et --stop-slowdown ne s'appliquent pas à un montage : régler chaque segment et son thème",
+            );
+        }
+        return montage::render(arg, seconds, threads, frame.map(|(frame, _)| frame));
+    }
+    let (scene, paths) = scene_lasting(arg, variant.duration)?;
+    let mut theme = load::theme(&scene.run)?;
+    if let Some(slowdown) = variant.stop_slowdown {
+        theme.camera.stop_slowdown = slowdown;
+    }
+    let renderer = scene.renderer(theme, None)?;
     std::fs::create_dir_all(&paths.out)?;
     let console = console(&scene);
-    if let Some(frame) = frame {
+    if let Some((frame, with_hud)) = frame {
         let out = paths.out.join(format!("frame-{frame}.png"));
-        write_image(&scene.still(&renderer, frame, true, &console)?, &out)?;
+        write_image(&scene.still(&renderer, frame, with_hud, &console)?, &out)?;
         println!("{}", out.display());
         return Ok(());
     }
     let threads = threads_or_all(threads);
-    let video = video_file(&paths, duration);
+    let video = video_file(&paths, variant);
     scene.encode_video(&renderer, seconds, threads, &video.display().to_string(), &console)?;
     println!("{}", video.display());
     Ok(())

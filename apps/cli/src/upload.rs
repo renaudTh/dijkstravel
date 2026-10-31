@@ -1,14 +1,16 @@
-//! `dijkstravel upload runs/<nom>` : envoie la vidéo, la couverture et `publication.txt` du run dans
-//! `Documents/dijkstravel/<nom>/` du Nextcloud décrit dans `.env` (fichiers déjà présents remplacés).
-//! `--duration n` envoie la variante `video-<n>s.mp4` à la place de `video.mp4`.
+//! `dijkstravel upload runs/<nom>` : envoie la vidéo, la couverture et `publication.txt` du run ou du
+//! montage dans `Documents/dijkstravel/<nom>/` du Nextcloud décrit dans `.env` (fichiers déjà présents
+//! remplacés).
+//! `--duration n` et `--stop-slowdown n` envoient la variante rendue avec les mêmes options à la place de
+//! `video.mp4`.
 
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use ureq::http::{Method, Request};
 
-use crate::load::{self, Outcome, fail};
-use crate::render;
+use crate::load::{self, Outcome, RunPaths, fail};
+use crate::{montage, render};
 
 /// Dossier Nextcloud qui reçoit un sous-dossier par run.
 const REMOTE_ROOT: [&str; 2] = ["Documents", "dijkstravel"];
@@ -89,30 +91,40 @@ impl Connection {
     }
 }
 
-pub fn main(arg: &Path, duration: Option<f64>) -> Outcome {
+pub fn main(arg: &Path, variant: render::Variant) -> Outcome {
     let Some(nextcloud) = connection() else {
         return fail("NEXTCLOUD_URL, NEXTCLOUD_USER et NEXTCLOUD_APP_PASSWORD attendus dans .env");
     };
-    let (run, paths) = load::run(arg)?;
-    let video = render::video_file(&paths, duration);
+    let (name, paths) = if montage::is_montage(arg) {
+        if !variant.options().is_empty() {
+            return fail("--duration et --stop-slowdown ne s'appliquent pas à un montage");
+        }
+        let montage = montage::load(arg)?;
+        let paths = RunPaths::of(arg, &montage.name);
+        (montage.name, paths)
+    } else {
+        let (run, paths) = load::run(arg)?;
+        (run.name, paths)
+    };
+    let video = render::video_file(&paths, variant);
     if !video.exists() {
-        let option = duration.map(|duration| format!(" --duration {duration}")).unwrap_or_default();
         return fail(format!(
-            "{} absente : rendre la vidéo d'abord (dijkstravel render {}{option}).",
+            "{} absente : rendre la vidéo d'abord (dijkstravel render {}{}).",
             video.display(),
-            arg.display()
+            arg.display(),
+            variant.options()
         ));
     }
     let files: Vec<PathBuf> = [video, paths.out.join("cover.jpg"), paths.out.join("publication.txt")]
         .into_iter()
         .filter(|file| file.exists())
         .collect();
-    let folder = nextcloud.ensure_folders(&[REMOTE_ROOT[0], REMOTE_ROOT[1], &run.name])?;
+    let folder = nextcloud.ensure_folders(&[REMOTE_ROOT[0], REMOTE_ROOT[1], &name])?;
     // Séquentiel : un fichier à la fois sur la bande passante.
     for file in files {
         let size = nextcloud.upload(&folder, &file)?;
-        let name = file.file_name().and_then(|name| name.to_str()).unwrap_or_default();
-        println!("{} → {}/{}/{name} ({:.1} Mo)", file.display(), REMOTE_ROOT.join("/"), run.name, size as f64 / 1e6);
+        let file_name = file.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        println!("{} → {}/{}/{file_name} ({:.1} Mo)", file.display(), REMOTE_ROOT.join("/"), name, size as f64 / 1e6);
     }
     Ok(())
 }
