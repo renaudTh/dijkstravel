@@ -29,12 +29,15 @@ const HAZE: &str = "#dfe8f0";
 /// distances de la caméra : au-delà, la brume les noie et la carte des ombres serait trop lâche près de la
 /// caméra. Fixe : la carte ne change ni de taille ni de finesse quand la caméra tourne.
 const SHADOW_REACH: f64 = 3.0;
+/// Altitude au plus au-dessus ou au-dessous du point visé que la carte des ombres doit contenir, en mètres.
+const SHADOW_RELIEF: f64 = 4000.0;
 /// Les morceaux qui projettent les ombres viennent de ce nombre de niveaux d'atlas au-dessus de celui de la
 /// caméra : un relief plus grossier suffit à une ombre, et tous au même niveau, elle ne change pas de forme
 /// avec la distance.
-/// Altitude au plus au-dessus ou au-dessous du point visé que la carte des ombres doit contenir, en mètres.
-const SHADOW_RELIEF: f64 = 4000.0;
 const CASTER_LEVELS: u32 = 1;
+/// Morceaux au plus sur le côté du carré qui projette les ombres : au-delà, un niveau plus grossier. Sans
+/// borne, un dézoom en traverserait jusqu'à quatre fois plus, recréés à chaque image en mémoire vidéo.
+const MAX_CASTER_SIDE: i64 = 21;
 /// Un point est caché si le relief devant lui est plus proche de cette part de sa distance.
 const OCCLUSION_MARGIN: f64 = 0.01;
 
@@ -113,13 +116,19 @@ impl Terrain3d {
     /// soient vus ou non.
     pub fn shadow_casters(&self, atlas: &Atlas, perspective: &Perspective) -> Vec<ChunkKey> {
         let camera = perspective.camera();
-        let level = atlas.level_for(camera.zoom) + CASTER_LEVELS;
-        let level_zoom = self.travel_zoom - f64::from(level);
-        let [x, y] = crate::mercator::project(camera.center, level_zoom);
-        let half = SHADOW_REACH * perspective.distance() * (level_zoom - camera.zoom).exp2();
         let chunk = f64::from(CHUNK);
-        let range = |center: f64| ((center - half) / chunk).floor() as i64..=((center + half) / chunk).floor() as i64;
-        range(y).flat_map(|y| range(x).map(move |x| ChunkKey { level, x, y })).collect()
+        let mut level = atlas.level_for(camera.zoom) + CASTER_LEVELS;
+        loop {
+            let level_zoom = self.travel_zoom - f64::from(level);
+            let [x, y] = crate::mercator::project(camera.center, level_zoom);
+            let half = SHADOW_REACH * perspective.distance() * (level_zoom - camera.zoom).exp2();
+            let range =
+                |center: f64| ((center - half) / chunk).floor() as i64..=((center + half) / chunk).floor() as i64;
+            if range(x).count() as i64 <= MAX_CASTER_SIDE || level_zoom < 1.0 {
+                return range(y).flat_map(|y| range(x).map(move |x| ChunkKey { level, x, y })).collect();
+            }
+            level += 1;
+        }
     }
 
     /// Tuiles de relief des maillages qui projettent les ombres.

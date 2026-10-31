@@ -22,8 +22,9 @@ pub(crate) const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8U
 /// ligne à ligne sans conversion.
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-/// Textures de morceaux gardées en mémoire vidéo : 1,4 Mo chacune avec leurs mipmaps.
-const TEXTURES: usize = 768;
+/// Textures de morceaux gardées en mémoire vidéo : 1,4 Mo chacune avec leurs mipmaps, 700 Mo en tout. Une
+/// image en 4K en lit deux cents environ, le double en transfert.
+const TEXTURES: usize = 512;
 /// Maillages gardés en mémoire vidéo : 50 Ko chacun.
 const MESHES: usize = 768;
 /// Échantillons par pixel de l'image : crêtes lisses contre le ciel. La profondeur relue vient d'une
