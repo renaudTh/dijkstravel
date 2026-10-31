@@ -9,6 +9,7 @@ pub mod cache;
 pub mod color;
 pub mod elevation;
 pub mod frame;
+pub mod gpu;
 pub mod hillshade;
 pub mod hud;
 pub mod infra;
