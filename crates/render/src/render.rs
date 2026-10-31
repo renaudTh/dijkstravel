@@ -447,6 +447,8 @@ impl Renderer {
         let exaggeration = self.input.theme.camera.terrain_exaggeration;
         let mut chunks = BTreeSet::new();
         let mut transfer_chunks = BTreeSet::new();
+        let mut casters = BTreeSet::new();
+        let sunlit = self.input.theme.camera.sunlight > 0.0;
         for frame in frames {
             let moment = self.animation.moment_at(frame);
             let camera = self.on_screen(self.animation.camera_at(moment));
@@ -454,6 +456,9 @@ impl Renderer {
             // absent du cache mis en mémoire comme manquant.
             let perspective = crate::perspective::Perspective::new(camera, width, height, 0.0, exaggeration);
             let seen = terrain.chunks(&self.atlas, &perspective);
+            if sunlit {
+                casters.extend(terrain.shadow_casters(&self.atlas, &perspective));
+            }
             if self.transfer_atlas.is_some() && self.animation.transfer_blend(self.animation.meters_of(moment)) > 0.0 {
                 transfer_chunks.extend(seen.iter().copied());
             }
@@ -461,6 +466,7 @@ impl Renderer {
         }
         let chunks: Vec<_> = chunks.into_iter().collect();
         let mut tiles = terrain.tiles_of(&self.atlas, &chunks);
+        tiles.extend(terrain.caster_tiles(&casters.into_iter().collect::<Vec<_>>()));
         if let Some(transfer) = &self.transfer_atlas {
             let transfer_chunks: Vec<_> = transfer_chunks.into_iter().collect();
             tiles.extend(transfer_chunks.iter().flat_map(|&key| transfer.tiles_of(key)));

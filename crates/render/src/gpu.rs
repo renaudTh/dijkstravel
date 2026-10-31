@@ -103,6 +103,16 @@ pub struct ChunkDraw<'a> {
     pub transfer_image: &'a dyn Fn() -> Option<ChunkLayers<'a>>,
 }
 
+/// Un morceau qui projette son ombre sans être dessiné : ceux de la carte des ombres couvrent le sol autour
+/// du point visé, vu ou non, pour qu'une crête hors champ fasse son ombre.
+pub struct CasterDraw<'a> {
+    pub mesh_key: u64,
+    /// Coin haut gauche en repère local, côté en pixels monde au zoom de la caméra.
+    pub origin: [f32; 2],
+    pub size: f32,
+    pub mesh: &'a dyn Fn() -> Arc<Vec<Vertex>>,
+}
+
 /// La profondeur de l'image rendue (0 au plan proche, 1 au lointain ou dans le ciel), ligne par ligne, à
 /// `depth_size` : la même vue, en moins de pixels pour une grande image (`depth_size`).
 pub struct Rendered {
@@ -439,7 +449,14 @@ impl Gpu {
 
     /// Ciel puis morceaux, relus en mémoire.
     /// L'image se dessine dans `canvas`, qu'elle recouvre ; la profondeur est rendue.
-    pub fn render(&self, settings: &FrameSettings, chunks: &[ChunkDraw], canvas: &Canvas) -> Rendered {
+    /// `casters` : les morceaux de la carte des ombres, s'il y en a une.
+    pub fn render(
+        &self,
+        settings: &FrameSettings,
+        chunks: &[ChunkDraw],
+        casters: &[CasterDraw],
+        canvas: &Canvas,
+    ) -> Rendered {
         let device = &self.device;
         let light = settings.light;
         let frame = FrameUniform {
@@ -463,9 +480,15 @@ impl Gpu {
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: frame_buffer.as_entire_binding() }],
         });
         let stride = self.chunk_stride as usize;
-        let mut chunk_data = vec![0u8; stride * chunks.len().max(1)];
-        for (i, chunk) in chunks.iter().enumerate() {
-            let uniform = ChunkUniform { origin_size: [chunk.origin[0], chunk.origin[1], chunk.size, 0.0] };
+        // Les morceaux dessinés, puis ceux de la carte des ombres.
+        let placements: Vec<([f32; 2], f32)> = chunks
+            .iter()
+            .map(|chunk| (chunk.origin, chunk.size))
+            .chain(casters.iter().map(|caster| (caster.origin, caster.size)))
+            .collect();
+        let mut chunk_data = vec![0u8; stride * placements.len().max(1)];
+        for (i, (origin, size)) in placements.iter().enumerate() {
+            let uniform = ChunkUniform { origin_size: [origin[0], origin[1], *size, 0.0] };
             chunk_data[i * stride..i * stride + size_of::<ChunkUniform>()]
                 .copy_from_slice(bytemuck::bytes_of(&uniform));
         }
@@ -541,8 +564,9 @@ impl Gpu {
             pass.set_pipeline(&self.shadow);
             pass.set_bind_group(0, &shadow_group, &[]);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            for (i, (_, mesh)) in draws.iter().enumerate() {
-                pass.set_bind_group(1, &chunk_group, &[(i * stride) as u32]);
+            for (i, caster) in casters.iter().enumerate() {
+                let mesh = self.mesh(caster.mesh_key, caster.mesh);
+                pass.set_bind_group(1, &chunk_group, &[((chunks.len() + i) * stride) as u32]);
                 pass.set_vertex_buffer(0, mesh.slice(..));
                 pass.draw_indexed(0..self.index_count, 0, 0..1);
             }
@@ -946,7 +970,7 @@ mod tests {
             transfer_image: &none,
         };
         let mut surface = surfaces::raster_n32_premul((width as i32, height as i32)).unwrap();
-        let rendered = gpu.render(&settings, &[chunk], surface.canvas());
+        let rendered = gpu.render(&settings, &[chunk], &[], surface.canvas());
         let image = surface.image_snapshot();
         let pixel = |x: i32, y: i32| image.peek_pixels().unwrap().get_color((x, y));
         assert_eq!(pixel(135, 240), Color::RED);

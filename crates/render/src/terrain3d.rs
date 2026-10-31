@@ -13,7 +13,7 @@ use crate::color::parse_color;
 use crate::elevation::Elevation;
 use crate::frame::Camera;
 use crate::geo::LonLat;
-use crate::gpu::{ChunkDraw, FrameSettings, Gpu, Rendered};
+use crate::gpu::{CasterDraw, ChunkDraw, FrameSettings, Gpu, Rendered};
 use crate::light::Sun;
 use crate::mercator::Projection;
 use crate::mesh::Meshes;
@@ -25,11 +25,16 @@ const EXTRA_LEVELS: u32 = 6;
 /// Ciel et brume, avant le voile du thème.
 const SKY: &str = "#7fa9d6";
 const HAZE: &str = "#dfe8f0";
-/// Les ombres portées couvrent le sol vu jusqu'à cette distance du point visé, en distances de la caméra :
-/// au-delà, la brume les noie et la carte des ombres serait trop lâche près de la caméra.
+/// Les ombres portées couvrent le sol jusqu'à cette distance du point visé (demi-côté d'un carré), en
+/// distances de la caméra : au-delà, la brume les noie et la carte des ombres serait trop lâche près de la
+/// caméra. Fixe : la carte ne change ni de taille ni de finesse quand la caméra tourne.
 const SHADOW_REACH: f64 = 3.0;
+/// Les morceaux qui projettent les ombres viennent de ce nombre de niveaux d'atlas au-dessus de celui de la
+/// caméra : un relief plus grossier suffit à une ombre, et tous au même niveau, elle ne change pas de forme
+/// avec la distance.
 /// Altitude au plus au-dessus ou au-dessous du point visé que la carte des ombres doit contenir, en mètres.
 const SHADOW_RELIEF: f64 = 4000.0;
+const CASTER_LEVELS: u32 = 1;
 /// Un point est caché si le relief devant lui est plus proche de cette part de sa distance.
 const OCCLUSION_MARGIN: f64 = 0.01;
 
@@ -104,6 +109,24 @@ impl Terrain3d {
         select_chunks(perspective, self.travel_zoom, atlas.level_for(perspective.camera().zoom))
     }
 
+    /// Morceaux qui projettent les ombres : un carré fixe autour du point visé, d'un même niveau, qu'ils
+    /// soient vus ou non.
+    pub fn shadow_casters(&self, atlas: &Atlas, perspective: &Perspective) -> Vec<ChunkKey> {
+        let camera = perspective.camera();
+        let level = atlas.level_for(camera.zoom) + CASTER_LEVELS;
+        let level_zoom = self.travel_zoom - f64::from(level);
+        let [x, y] = crate::mercator::project(camera.center, level_zoom);
+        let half = SHADOW_REACH * perspective.distance() * (level_zoom - camera.zoom).exp2();
+        let chunk = f64::from(CHUNK);
+        let range = |center: f64| ((center - half) / chunk).floor() as i64..=((center + half) / chunk).floor() as i64;
+        range(y).flat_map(|y| range(x).map(move |x| ChunkKey { level, x, y })).collect()
+    }
+
+    /// Tuiles de relief des maillages qui projettent les ombres.
+    pub fn caster_tiles(&self, casters: &[ChunkKey]) -> BTreeSet<String> {
+        casters.iter().flat_map(|&key| self.meshes.tiles_of(key)).collect()
+    }
+
     /// Tuiles que lisent les morceaux (imagerie, ombrage, frontières) et leurs maillages.
     pub fn tiles_of(&self, atlas: &Atlas, chunks: &[ChunkKey]) -> BTreeSet<String> {
         chunks.iter().flat_map(|&key| atlas.tiles_of(key).into_iter().chain(self.meshes.tiles_of(key))).collect()
@@ -144,6 +167,21 @@ impl Terrain3d {
             light: sun.map(|sun| sun.light()).unwrap_or_default(),
             shadow: sun.map(|sun| sun_view(perspective, sun.light().direction)),
         };
+        let caster_keys = if sun.is_some() { self.shadow_casters(atlas, perspective) } else { Vec::new() };
+        let caster_meshes: Vec<_> = caster_keys.iter().map(|&key| move || self.meshes.mesh(key)).collect();
+        let casters: Vec<CasterDraw> = caster_keys
+            .iter()
+            .zip(&caster_meshes)
+            .map(|(&key, mesh)| {
+                let rect = local_rect(perspective, self.travel_zoom, key);
+                CasterDraw {
+                    mesh_key: hash((self.travel_zoom.to_bits(), key)),
+                    origin: [rect.left as f32, rect.top as f32],
+                    size: rect.size as f32,
+                    mesh,
+                }
+            })
+            .collect();
         let meshes: Vec<_> = chunks.iter().map(|&key| move || self.meshes.mesh(key)).collect();
         let images: Vec<_> = chunks.iter().map(|&key| move || atlas.layers(key)).collect();
         let transfer_images: Vec<_> =
@@ -165,7 +203,7 @@ impl Terrain3d {
                 }
             })
             .collect();
-        self.gpu.render(&settings, &draws, canvas)
+        self.gpu.render(&settings, &draws, &casters, canvas)
     }
 
     /// La projection du tracé et des lieux sur le relief rendu ; `lift` : demi-largeur du tracé, en pixels de
@@ -346,25 +384,28 @@ impl LocalRect {
     }
 }
 
-/// Vue orthographique du relief depuis le soleil (`direction` : vers lui, en repère local), cadrée sur le sol
-/// vu autour du point visé ; et le côté d'un pixel de la carte des ombres, en repère local.
+/// Vue orthographique du relief depuis le soleil (`direction` : vers lui, en repère local), cadrée sur le carré
+/// des ombres autour du point visé ; et le côté d'un pixel de la carte des ombres, en repère local. Taille
+/// fixe, calée sur une grille du monde : d'une image à l'autre, la carte glisse de pixels entiers et le bord
+/// des ombres ne scintille pas.
 fn sun_view(perspective: &Perspective, direction: [f32; 3]) -> ([[f32; 4]; 4], f32) {
-    use glam::DVec3;
     use glam::dcamera::rh::{proj, view};
-    let ground = perspective.ground();
-    let reach = perspective
-        .ground_footprint()
-        .into_iter()
-        .map(|point| perspective.local(point, ground).truncate().length())
-        .fold(0.0, f64::max)
-        .min(SHADOW_REACH * perspective.distance());
-    // Sphère qui contient le sol couvert et son relief : la vue la contient sous tout angle du soleil.
-    let radius = reach.hypot(SHADOW_RELIEF * perspective.z_per_meter()).max(1.0);
+    use glam::{DMat4, DVec3};
+    let half = SHADOW_REACH * perspective.distance();
+    // Sphère qui contient le carré et son relief : la vue la contient sous tout angle du soleil.
+    let radius = (half * std::f64::consts::SQRT_2).hypot(SHADOW_RELIEF * perspective.z_per_meter());
     let toward_sun = DVec3::new(f64::from(direction[0]), f64::from(direction[1]), f64::from(direction[2])).normalize();
     let up = if toward_sun.z.abs() > 0.99 { DVec3::Y } else { DVec3::Z };
     let look = view::look_at_mat4(toward_sun * 2.0 * radius, DVec3::ZERO, up);
     let projection = proj::directx::orthographic(-radius, radius, -radius, radius, radius, 3.0 * radius);
-    let matrix = (projection * look).to_cols_array_2d().map(|column| column.map(|v| v as f32));
+    let mut matrix = projection * look;
+    // Un point fixe du monde (l'origine des pixels monde) posé sur un coin de pixel de la carte.
+    let target = perspective.target();
+    let anchor = matrix.project_point3(DVec3::new(-target[0], target[1], 0.0));
+    let texels = f64::from(crate::gpu::SHADOW_SIZE) / 2.0;
+    let snap = |ndc: f64| (ndc * texels).round() / texels - ndc;
+    matrix = DMat4::from_translation(DVec3::new(snap(anchor.x), snap(anchor.y), 0.0)) * matrix;
+    let matrix = matrix.to_cols_array_2d().map(|column| column.map(|v| v as f32));
     (matrix, (2.0 * radius / f64::from(crate::gpu::SHADOW_SIZE)) as f32)
 }
 
