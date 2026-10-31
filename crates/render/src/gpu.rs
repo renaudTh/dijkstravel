@@ -19,6 +19,9 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const TEXTURES: usize = 768;
 /// Maillages gardés en mémoire vidéo : 50 Ko chacun.
 const MESHES: usize = 768;
+/// Échantillons par pixel de l'image : crêtes lisses contre le ciel. La profondeur relue vient d'une
+/// seconde passe à un échantillon, un tampon multi-échantillonné ne se relisant pas.
+const SAMPLES: u32 = 4;
 /// Niveaux de mipmap au plus : contre le fourmillement des morceaux lointains vus en rasant.
 const MIP_LEVELS: u32 = 6;
 
@@ -94,6 +97,8 @@ pub struct Gpu {
     height: u32,
     sky: wgpu::RenderPipeline,
     terrain: wgpu::RenderPipeline,
+    /// Le relief sans couleur, à un échantillon : la profondeur relue.
+    terrain_depth: wgpu::RenderPipeline,
     frame_layout: wgpu::BindGroupLayout,
     chunk_layout: wgpu::BindGroupLayout,
     texture_layout: wgpu::BindGroupLayout,
@@ -109,6 +114,9 @@ pub struct Gpu {
 
 /// Ce qui ne sert qu'à un passage à la fois.
 struct Targets {
+    /// L'image multi-échantillonnée, résolue dans `color`.
+    samples: wgpu::Texture,
+    samples_depth: wgpu::Texture,
     color: wgpu::Texture,
     depth: wgpu::Texture,
     color_readback: wgpu::Buffer,
@@ -203,51 +211,56 @@ impl Gpu {
         });
         let color_target =
             [Some(wgpu::ColorTargetState { format: COLOR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
-        let pipeline =
-            |vertex: &str, fragment: &str, buffers: &[Option<wgpu::VertexBufferLayout>], depth_write: bool| {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(vertex),
-                    layout: Some(&layout),
-                    vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: Some(vertex),
-                        compilation_options: Default::default(),
-                        buffers,
-                    },
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        cull_mode: None,
-                        ..Default::default()
-                    },
-                    depth_stencil: Some(wgpu::DepthStencilState {
-                        format: DEPTH_FORMAT,
-                        depth_write_enabled: Some(depth_write),
-                        depth_compare: Some(if depth_write {
-                            wgpu::CompareFunction::Less
-                        } else {
-                            wgpu::CompareFunction::Always
-                        }),
-                        stencil: Default::default(),
-                        bias: Default::default(),
+        let pipeline = |vertex: &str,
+                        fragment: Option<&str>,
+                        buffers: &[Option<wgpu::VertexBufferLayout>],
+                        depth_write: bool,
+                        samples: u32| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(vertex),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some(vertex),
+                    compilation_options: Default::default(),
+                    buffers,
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(depth_write),
+                    depth_compare: Some(if depth_write {
+                        wgpu::CompareFunction::Less
+                    } else {
+                        wgpu::CompareFunction::Always
                     }),
-                    multisample: Default::default(),
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: Some(fragment),
-                        compilation_options: Default::default(),
-                        targets: &color_target,
-                    }),
-                    multiview_mask: None,
-                    cache: None,
-                })
-            };
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
+                fragment: fragment.map(|fragment| wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(fragment),
+                    compilation_options: Default::default(),
+                    targets: &color_target,
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3],
         };
-        let sky = pipeline("sky_vertex", "sky_fragment", &[], false);
-        let terrain = pipeline("terrain_vertex", "terrain_fragment", &[Some(vertex_layout)], true);
+        let sky = pipeline("sky_vertex", Some("sky_fragment"), &[], false, SAMPLES);
+        let terrain =
+            pipeline("terrain_vertex", Some("terrain_fragment"), &[Some(vertex_layout.clone())], true, SAMPLES);
+        let terrain_depth = pipeline("terrain_vertex", None, &[Some(vertex_layout)], true, 1);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("morceaux"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -274,6 +287,7 @@ impl Gpu {
             height,
             sky,
             terrain,
+            terrain_depth,
             frame_layout,
             chunk_layout,
             texture_layout,
@@ -354,22 +368,24 @@ impl Gpu {
         let targets = self.targets.lock().unwrap();
         let color_view = targets.color.create_view(&Default::default());
         let depth_view = targets.depth.create_view(&Default::default());
+        let samples_view = targets.samples.create_view(&Default::default());
+        let samples_depth_view = targets.samples_depth.create_view(&Default::default());
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("relief") });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("relief"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &color_view,
+                    view: &samples_view,
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: Some(&color_view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
+                        store: wgpu::StoreOp::Discard,
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_view,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    view: &samples_depth_view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,
@@ -386,6 +402,29 @@ impl Gpu {
             pass.set_pipeline(&self.sky);
             pass.draw(0..3, 0..1);
             pass.set_pipeline(&self.terrain);
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            for (i, (group, mesh)) in draws.iter().enumerate() {
+                pass.set_bind_group(1, &chunk_group, &[(i * stride) as u32]);
+                pass.set_bind_group(2, group, &[]);
+                pass.set_vertex_buffer(0, mesh.slice(..));
+                pass.draw_indexed(0..self.index_count, 0, 0..1);
+            }
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("profondeur"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.terrain_depth);
+            pass.set_bind_group(0, &frame_group, &[]);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             for (i, (group, mesh)) in draws.iter().enumerate() {
                 pass.set_bind_group(1, &chunk_group, &[(i * stride) as u32]);
@@ -525,12 +564,12 @@ impl Gpu {
 
 impl Targets {
     fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
-        let target = |label: &str, format: wgpu::TextureFormat| {
+        let target = |label: &str, format: wgpu::TextureFormat, sample_count: u32| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
                 size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
                 mip_level_count: 1,
-                sample_count: 1,
+                sample_count,
                 dimension: wgpu::TextureDimension::D2,
                 format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
@@ -546,8 +585,10 @@ impl Targets {
             })
         };
         Targets {
-            color: target("image", COLOR_FORMAT),
-            depth: target("profondeur", DEPTH_FORMAT),
+            samples: target("échantillons", COLOR_FORMAT, SAMPLES),
+            samples_depth: target("profondeur des échantillons", DEPTH_FORMAT, SAMPLES),
+            color: target("image", COLOR_FORMAT, 1),
+            depth: target("profondeur", DEPTH_FORMAT, 1),
             color_readback: readback("image relue"),
             depth_readback: readback("profondeur relue"),
         }
