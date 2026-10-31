@@ -33,7 +33,7 @@ pub struct Import {
     /// Titre de la carte d'infos, à la place du nom de la trace.
     #[arg(long)]
     pub title: Option<String>,
-    /// Thème (`themes/<nom>.json`) ; par défaut `trail` pour une activité à pied, sinon `default`.
+    /// Thème (`themes/<nom>.json`) ; par défaut `trail` pour une activité à pied, sinon `ign` (photo aérienne).
     #[arg(long)]
     pub theme: Option<String>,
     /// Format de la vidéo : `16:9` ou `9:16`.
@@ -132,7 +132,7 @@ pub fn main(import: Import) -> Outcome {
         "start": { "place": depart },
         "mode": "open",
         "profile": if on_foot { "foot" } else { "car" },
-        "theme": import.theme.clone().unwrap_or_else(|| (if on_foot { "trail" } else { "default" }).to_owned()),
+        "theme": import.theme.clone().unwrap_or_else(|| (if on_foot { "trail" } else { "ign" }).to_owned()),
         "video": { "format": import.format, "durationSec": import.duration, "introSec": 2, "outroSec": 4 },
     });
     if let Some(schedule) = schedule {
