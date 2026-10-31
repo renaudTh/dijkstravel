@@ -49,8 +49,9 @@ impl Scene {
         }
     }
 
-    /// Rend la scène en `width × height` pixels plutôt qu'au format du run. Le cadrage reste réglé pour un
-    /// petit côté de 1080 pixels : plus grand, la carte en montre plus, aux mêmes tailles de tracé et de textes.
+    /// Rend la scène en `width × height` pixels plutôt qu'au format du run. Tout se met à l'échelle du petit
+    /// côté (`Video::scale`) : même cadrage, tracé, lieux et carte d'infos aux mêmes proportions, fond plus
+    /// détaillé.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.size = Some((width, height));
     }

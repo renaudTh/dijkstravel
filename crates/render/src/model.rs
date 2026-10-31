@@ -42,6 +42,10 @@ pub struct TileSource {
     pub maxzoom: u8,
 }
 
+/// Petit côté de l'écran de référence, en pixels : le cadrage et les tailles du thème y sont réglés, et
+/// tout se met à l'échelle d'une autre taille (`Video::scale`).
+pub const REFERENCE_SIDE: f64 = 1080.0;
+
 /// Lue aussi dans les valeurs de référence des tests.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,4 +56,18 @@ pub struct Video {
     pub intro_sec: f64,
     pub outro_sec: f64,
     pub fps: u32,
+}
+
+impl Video {
+    /// Pixels de l'image par pixel de l'écran de référence : 2 en 2160 × 3840.
+    pub fn scale(&self) -> f64 {
+        f64::from(self.width.min(self.height)) / REFERENCE_SIDE
+    }
+
+    /// Taille de l'écran de référence de même format, sur lequel se placent le tracé, les lieux et la
+    /// carte d'infos.
+    pub fn reference_size(&self) -> (u32, u32) {
+        let scale = self.scale();
+        ((f64::from(self.width) / scale).round() as u32, (f64::from(self.height) / scale).round() as u32)
+    }
 }

@@ -69,7 +69,7 @@ enum Command {
         #[arg(long)]
         zoom: Option<f64>,
         /// Largeur de la vidéo en pixels, à la place du format du run, avec `--height` ; écrit
-        /// `video-<l>x<h>.mp4`. Le cadrage est réglé pour un petit côté de 1080 pixels.
+        /// `video-<l>x<h>.mp4`. Tout se met à l'échelle : 2160 × 3840, c'est la vidéo 1080 × 1920 en 4K.
         #[arg(long, requires = "height")]
         width: Option<u32>,
         /// Hauteur de la vidéo en pixels, avec `--width`.

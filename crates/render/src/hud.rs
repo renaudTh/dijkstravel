@@ -91,9 +91,11 @@ impl Hud {
         credit: &str,
         font_files: &[String],
         stop_images: &[Option<String>],
-        width: u32,
-        height: u32,
+        video: &crate::model::Video,
     ) -> Self {
+        // La carte se place sur l'écran de référence ; ses images sont à la résolution de la vidéo.
+        let (width, height) = video.reference_size();
+        let resolution = video.scale() as f32;
         let manager = FontMgr::new();
         let typefaces: Vec<Typeface> = font_files
             .iter()
@@ -102,7 +104,10 @@ impl Hud {
         let box_side = (theme.size as f32 * 1.9).round() as i32;
         let stop_images: Vec<Option<Image>> = stop_images
             .iter()
-            .map(|file| file.as_deref().and_then(|file| place_image(file, box_side, false)))
+            .map(|file| {
+                let pixels = (box_side as f32 * resolution.max(1.0)).round() as i32;
+                file.as_deref().and_then(|file| place_image(file, pixels, false))
+            })
             .collect();
         Hud {
             theme: theme.clone(),

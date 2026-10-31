@@ -148,7 +148,7 @@ impl Markers {
             placed.push(spot.with_outset((4.0, 4.0)));
             let mut paint = Paint::default();
             paint.set_alpha_f(opacity);
-            canvas.draw_image(&label.image, (spot.left - label.pad, spot.top - label.pad), Some(&paint));
+            label.draw(canvas, spot.left, spot.top, &paint);
         }
     }
 }

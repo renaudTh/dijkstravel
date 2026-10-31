@@ -71,6 +71,23 @@ impl Projection for View {
     }
 }
 
+/// Une projection de l'image réelle ramenée à l'écran de référence (`Video::scale`), sur lequel se
+/// placent le tracé et les lieux : positions divisées par `scale`, zoom de la référence.
+pub struct Scaled<'a> {
+    pub inner: &'a dyn Projection,
+    pub scale: f64,
+}
+
+impl Projection for Scaled<'_> {
+    fn screen_point(&self, point: LonLat) -> Option<[f64; 2]> {
+        self.inner.screen_point(point).map(|[x, y]| [x / self.scale, y / self.scale])
+    }
+
+    fn camera_zoom(&self) -> f64 {
+        self.inner.camera_zoom() - self.scale.log2()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

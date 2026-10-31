@@ -13,7 +13,7 @@ use crate::frame::{Animation, Camera, Moment};
 use crate::hud::{Hud, HudFrame, Profile};
 use crate::localities::Localities;
 use crate::markers::Markers;
-use crate::mercator::Projection;
+use crate::mercator::{Projection, Scaled};
 use crate::model::{Input, Tour, Video};
 use crate::route::Route;
 use crate::sprites::Fonts;
@@ -86,7 +86,8 @@ impl Renderer {
     pub fn new(input: Input, tour: Arc<Tour>, previous: Option<&Renderer>) -> Self {
         let theme = &input.theme;
         let animation = Animation::new(tour.clone(), &input.video, &theme.camera);
-        let travel_zoom = animation.travel_zoom();
+        // Le fond se rend à la taille réelle : son zoom gagne l'échelle de l'image sur la référence.
+        let travel_zoom = animation.travel_zoom() + input.video.scale().log2();
         let atlas = match previous {
             Some(previous) if previous.atlas.serves(travel_zoom, &input) => previous.atlas.clone(),
             _ => Arc::new(Atlas::new(travel_zoom, &input)),
@@ -103,7 +104,8 @@ impl Renderer {
             .and_then(|terrain| {
                 terrain.map_err(|error| eprintln!("vue inclinée impossible, rendu à plat : {error}")).ok()
             });
-        let fonts = Fonts::new();
+        let fonts = Fonts::at_resolution(input.video.scale() as f32);
+        let (reference_width, reference_height) = input.video.reference_size();
         // Chaque imagerie dessinée est créditée, une fois.
         let mut credits: Vec<&str> = Vec::new();
         for imagery in [Some(&input.imagery), input.sea_imagery.as_ref(), input.transfer_imagery.as_ref()] {
@@ -131,9 +133,10 @@ impl Renderer {
                 theme,
                 &fonts,
                 |meters| {
-                    atlas.view(animation.camera_at(Moment::Travel { meters }), input.video.width, input.video.height)
+                    let camera = animation.camera_at(Moment::Travel { meters });
+                    atlas.view(camera, reference_width, reference_height)
                 },
-                input.video.width as f32,
+                reference_width as f32,
             ),
             hud: Hud::new(
                 &theme.hud,
@@ -141,8 +144,7 @@ impl Renderer {
                 &credits.join(" · "),
                 &input.hud_fonts,
                 &tour.stops.iter().map(|stop| input.images.get(&stop.id).cloned()).collect::<Vec<_>>(),
-                input.video.width,
-                input.video.height,
+                &input.video,
             ),
             atlas,
             transfer_atlas,
@@ -171,14 +173,14 @@ impl Renderer {
     /// et les lieux atteints, à l'opacité `finished` (0 : le fond seul).
     pub fn draw_view(&self, canvas: &Canvas, camera: Camera, finished: f32) {
         let (width, height) = (self.input.video.width, self.input.video.height);
-        let screen = Rect::from_wh(width as f32, height as f32);
-        let view = self.atlas.view(camera, width, height);
+        let view = self.atlas.view(self.on_screen(camera), width, height);
         self.atlas.draw(canvas, view, width, height);
         if finished <= 0.0 {
             return;
         }
         let total = self.animation.total_meters();
         canvas.save_layer_alpha_f(None, finished.min(1.0));
+        let (view, screen) = self.to_reference(canvas, &view);
         self.route.draw(canvas, &view, screen, total);
         // Les lieux tels qu'à la dernière image du rendu.
         let stops_frame = StopsFrame {
@@ -189,6 +191,22 @@ impl Renderer {
         };
         self.stops.draw(canvas, &view, screen, &stops_frame);
         canvas.restore();
+        canvas.restore();
+    }
+
+    /// La caméra de l'image réelle pour une caméra de l'écran de référence : même sol vu, plus de pixels.
+    fn on_screen(&self, camera: Camera) -> Camera {
+        Camera { zoom: camera.zoom + self.input.video.scale().log2(), ..camera }
+    }
+
+    /// Passe `canvas` à l'écran de référence, jusqu'au prochain `restore` : la projection de l'image réelle
+    /// qui s'y lit, et le rectangle de l'écran.
+    fn to_reference<'a>(&self, canvas: &Canvas, view: &'a dyn Projection) -> (Scaled<'a>, Rect) {
+        let scale = self.input.video.scale();
+        let (width, height) = self.input.video.reference_size();
+        canvas.save();
+        canvas.scale((scale as f32, scale as f32));
+        (Scaled { inner: view, scale }, Rect::from_wh(width as f32, height as f32))
     }
 
     /// Distance sur laquelle un lieu atteint « pope ».
@@ -199,6 +217,7 @@ impl Renderer {
     /// Les tuiles que lit `draw_view` pour cette caméra.
     pub fn tiles_at(&self, camera: Camera) -> BTreeSet<String> {
         let (width, height) = (self.input.video.width, self.input.video.height);
+        let camera = self.on_screen(camera);
         self.atlas.chunks_for(camera, width, height).into_iter().flat_map(|chunk| self.atlas.tiles_of(chunk)).collect()
     }
 
@@ -218,7 +237,11 @@ impl Renderer {
                 (profile, if total > 0.0 { self.animation.meters_of(moment) / total } else { 0.0 })
             }),
         };
+        let scale = self.input.video.scale() as f32;
+        canvas.save();
+        canvas.scale((scale, scale));
         self.hud.draw(canvas, &hud_frame);
+        canvas.restore();
     }
 
     /// Points du tracé où se lit le profil d'altitude.
@@ -250,7 +273,8 @@ impl Renderer {
                     let size = (theme.stops.marker_label_size * LOCALITY_LABEL_SHARE) as f32;
                     let screen = self.animation.screen_meters();
                     let (dir, source) = (&self.input.tile_dir, &self.input.vector.name);
-                    Localities::new(dir, source, &self.tour, &Fonts::new(), size, colors, screen)
+                    let fonts = Fonts::at_resolution(self.input.video.scale() as f32);
+                    Localities::new(dir, source, &self.tour, &fonts, size, colors, screen)
                 })
             })
             .as_ref()
@@ -260,7 +284,9 @@ impl Renderer {
     /// (`camera_tiles`) téléchargées.
     fn hold_pitches(&self) {
         if self.terrain.is_some() {
-            let size = [self.input.video.width, self.input.video.height];
+            // La géométrie de la vue inclinée ne dépend que du format : l'écran de référence suffit.
+            let (width, height) = self.input.video.reference_size();
+            let size = [width, height];
             let exaggeration = self.input.theme.camera.terrain_exaggeration;
             let elevation = self.atlas.elevation();
             self.animation.hold_pitches(|| crate::sight::limits(&self.animation, &elevation, size, exaggeration));
@@ -303,7 +329,9 @@ impl Frames for Renderer {
         if self.terrain.is_none() {
             return Vec::new();
         }
-        let size = [self.input.video.width, self.input.video.height];
+        // La géométrie de la vue inclinée ne dépend que du format : l'écran de référence suffit.
+        let (width, height) = self.input.video.reference_size();
+        let size = [width, height];
         let exaggeration = self.input.theme.camera.terrain_exaggeration;
         crate::sight::tiles(&self.animation, &self.atlas.elevation(), size, exaggeration).into_iter().collect()
     }
@@ -323,7 +351,7 @@ impl Frames for Renderer {
         let mut transfer_chunks = BTreeSet::new();
         for frame in frames {
             let moment = self.animation.moment_at(frame);
-            let camera = self.animation.camera_at(moment);
+            let camera = self.on_screen(self.animation.camera_at(moment));
             chunks.extend(self.atlas.chunks_for(camera, width, height));
             // Le fond des transferts, seulement là où il se voit.
             if let Some(transfer) = &self.transfer_atlas
@@ -344,7 +372,7 @@ impl Frames for Renderer {
     fn draw(&self, canvas: &Canvas, frame: u32, with_hud: bool) {
         let (width, height) = (self.input.video.width, self.input.video.height);
         let moment = self.animation.moment_at(frame);
-        let camera = self.animation.camera_at(moment);
+        let camera = self.on_screen(self.animation.camera_at(moment));
         let meters = self.animation.meters_of(moment);
         let blend = self.animation.transfer_blend(meters);
         if let Some(terrain) = &self.terrain {
@@ -373,8 +401,8 @@ impl Frames for Renderer {
 impl Renderer {
     /// Tracé, tête, repères, lieux et carte d'infos de l'image, par-dessus le fond.
     fn draw_overlays(&self, canvas: &Canvas, view: &dyn Projection, frame: u32, with_hud: bool) {
-        let (width, height) = (self.input.video.width, self.input.video.height);
-        let screen = Rect::from_wh(width as f32, height as f32);
+        let (view, screen) = self.to_reference(canvas, view);
+        let view = &view;
         let moment = self.animation.moment_at(frame);
         let meters = self.animation.meters_of(moment);
         let hud = self.animation.hud_at(meters);
@@ -394,6 +422,7 @@ impl Renderer {
         self.markers.draw(canvas, view, screen, meters, pop_meters, label_opacity as f32);
         let stops_frame = StopsFrame { visited: hud.visited, meters, pop_meters, label_opacity: label_opacity as f32 };
         self.stops.draw(canvas, view, screen, &stops_frame);
+        canvas.restore();
         if with_hud {
             self.draw_hud(canvas, frame);
         }
@@ -407,7 +436,7 @@ impl Renderer {
         let mut transfer_chunks = BTreeSet::new();
         for frame in frames {
             let moment = self.animation.moment_at(frame);
-            let camera = self.animation.camera_at(moment);
+            let camera = self.on_screen(self.animation.camera_at(moment));
             // L'emprise ne dépend pas de l'altitude du point visé : sans la lire, pas de relief encore
             // absent du cache mis en mémoire comme manquant.
             let perspective = crate::perspective::Perspective::new(camera, width, height, 0.0, exaggeration);

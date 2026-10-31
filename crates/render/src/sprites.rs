@@ -12,6 +12,9 @@ pub const ICON_PIXELS: f32 = 64.0;
 
 pub struct Fonts {
     collection: FontCollection,
+    /// Pixels de l'image par pixel de l'écran de référence (`Video::scale`) : les noms se dessinent à
+    /// cette résolution pour rester nets une fois agrandis.
+    resolution: f32,
 }
 
 impl Default for Fonts {
@@ -22,9 +25,14 @@ impl Default for Fonts {
 
 impl Fonts {
     pub fn new() -> Self {
+        Self::at_resolution(1.0)
+    }
+
+    /// Des noms dessinés à `resolution` pixels d'image par pixel de l'écran de référence.
+    pub fn at_resolution(resolution: f32) -> Self {
         let mut collection = FontCollection::new();
         collection.set_default_font_manager(FontMgr::new(), None);
-        Fonts { collection }
+        Fonts { collection, resolution: resolution.max(1.0) }
     }
 
     pub fn paragraph(&self, text: &str, style: &TextStyle, align: TextAlign, width: f32) -> Paragraph {
@@ -57,9 +65,11 @@ impl Fonts {
         Some(surface.image_snapshot())
     }
 
-    /// Nom d'un lieu (Noto Sans Bold, halo de 2 pixels), avec la marge laissée autour du texte.
+    /// Nom d'un lieu (Noto Sans Bold, halo de 2 pixels), avec la marge laissée autour du texte. Tailles en
+    /// pixels de l'écran de référence ; l'image est à `resolution`.
     pub fn label(&self, text: &str, size: f32, color: Color, halo: Color) -> Option<Label> {
-        const HALO: f32 = 2.0;
+        let resolution = self.resolution;
+        let (size, halo_width) = (size * resolution, 2.0 * resolution);
         let mut style = TextStyle::new();
         style.set_font_families(&["Noto Sans"]).set_font_size(size).set_font_style(FontStyle::bold());
         let mut fill = Paint::default();
@@ -68,24 +78,47 @@ impl Fonts {
         let text_paragraph = self.paragraph(text, &style, TextAlign::Left, f32::INFINITY);
         let mut stroke = Paint::default();
         stroke.set_anti_alias(true).set_color(halo).set_style(paint::Style::Stroke);
-        stroke.set_stroke_width(HALO * 2.0).set_stroke_join(paint::Join::Round);
+        stroke.set_stroke_width(halo_width * 2.0).set_stroke_join(paint::Join::Round);
         style.set_foreground_paint(&stroke);
         let halo_paragraph = self.paragraph(text, &style, TextAlign::Left, f32::INFINITY);
         let (width, height) = (text_paragraph.max_intrinsic_width().ceil(), text_paragraph.height().ceil());
-        let pad = HALO + 1.0;
+        let pad = halo_width + resolution;
         let mut surface = surfaces::raster_n32_premul(((width + 2.0 * pad) as i32, (height + 2.0 * pad) as i32))?;
         halo_paragraph.paint(surface.canvas(), (pad, pad));
         text_paragraph.paint(surface.canvas(), (pad, pad));
-        Some(Label { image: surface.image_snapshot(), width, height, pad })
+        Some(Label {
+            image: surface.image_snapshot(),
+            width: width / resolution,
+            height: height / resolution,
+            pad: pad / resolution,
+            resolution,
+        })
     }
 }
 
 pub struct Label {
     pub image: Image,
-    /// Boîte du texte seul, halo exclu : c'est elle qui se place et qui entre en collision.
+    /// Boîte du texte seul, halo exclu, en pixels de l'écran de référence : c'est elle qui se place et qui
+    /// entre en collision.
     pub width: f32,
     pub height: f32,
     pub pad: f32,
+    /// Pixels de `image` par pixel de l'écran de référence.
+    resolution: f32,
+}
+
+impl Label {
+    /// Le nom dont la boîte du texte a son coin haut gauche en `(left, top)`.
+    pub fn draw(&self, canvas: &skia_safe::Canvas, left: f32, top: f32, paint: &Paint) {
+        if self.resolution == 1.0 {
+            canvas.draw_image(&self.image, (left - self.pad, top - self.pad), Some(paint));
+            return;
+        }
+        let (width, height) = (self.image.width() as f32, self.image.height() as f32);
+        let dest = Rect::from_xywh(left - self.pad, top - self.pad, width / self.resolution, height / self.resolution);
+        let sampling = SamplingOptions::new(skia_safe::FilterMode::Linear, skia_safe::MipmapMode::None);
+        canvas.draw_image_rect_with_sampling_options(&self.image, None, dest, sampling, paint);
+    }
 }
 
 /// Image d'un lieu (blason, logo) dans un carré de `pixels` de côté, entière et centrée ; posée sur le
