@@ -1,11 +1,13 @@
 //! Vidéo : les images sont rendues en parallèle, converties en YUV 4:2:0 dans leur thread, puis écrites
-//! dans l'ordre sur l'entrée d'un seul ffmpeg (x264 répartit lui-même l'encodage sur les cœurs).
+//! dans l'ordre sur l'entrée d'un seul ffmpeg. Il encode sur la puce vidéo de la carte NVIDIA (NVENC)
+//! quand elle répond, ce qui laisse le processeur au rendu ; sinon par x264, réparti sur les cœurs.
+//! `DIJKSTRAVEL_ENCODER=x264` force x264.
 
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Condvar, Mutex, mpsc};
+use std::sync::{Condvar, Mutex, OnceLock, mpsc};
 
 use skia_safe::ColorType;
 
@@ -14,6 +16,36 @@ use crate::render::Frames;
 
 /// Images rendues d'avance par thread au plus : borne la mémoire quand une image tarde.
 const AHEAD_PER_THREAD: u32 = 2;
+/// Côté le plus long que NVENC encode en H.264.
+const NVENC_MAX_SIDE: u32 = 4096;
+
+/// Réglages de l'encodeur H.264 pour une vidéo `width × height`.
+fn encoder(width: u32, height: u32) -> Vec<&'static str> {
+    // Mêmes réglages que l'ancien rendu (Chromium) : qualité et taille de fichier inchangées.
+    const X264: &str = "-c:v libx264 -preset veryfast -crf 23";
+    // Même qualité que x264 `-crf 23` (SSIM égale sur un passage en relief 4K), fichier un quart plus lourd.
+    const NVENC: &str = "-c:v h264_nvenc -preset p5 -tune hq -rc vbr -cq 30 -b:v 0 -bf 3 -spatial-aq 1 \
+                         -temporal-aq 1 -profile:v high";
+    let settings = if width.max(height) <= NVENC_MAX_SIDE && nvenc() { NVENC } else { X264 };
+    settings.split_whitespace().collect()
+}
+
+/// NVENC répond : ffmpeg l'a, la carte et son pilote aussi. Essayé une fois par processus.
+fn nvenc() -> bool {
+    static WORKS: OnceLock<bool> = OnceLock::new();
+    *WORKS.get_or_init(|| {
+        if std::env::var("DIJKSTRAVEL_ENCODER").is_ok_and(|encoder| encoder == "x264") {
+            return false;
+        }
+        Command::new("ffmpeg")
+            .args(["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:r=1", "-frames:v", "1"])
+            .args(["-c:v", "h264_nvenc", "-f", "null", "-"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    })
+}
 
 /// Les `frames` premières images, encodées dans `out` (MP4 H.264) ; `with_hud` : avec la carte d'infos.
 pub fn encode_video(
@@ -28,8 +60,8 @@ pub fn encode_video(
     let mut ffmpeg = Command::new("ffmpeg")
         .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "yuv420p"])
         .args(["-s", &format!("{width}x{height}"), "-r", &fps.to_string(), "-i", "-"])
-        // Mêmes réglages que l'ancien rendu (Chromium) : qualité et taille de fichier inchangées.
-        .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"])
+        .args(encoder(width, height))
+        .args(["-pix_fmt", "yuv420p"])
         .args(["-movflags", "+faststart", out])
         .stdin(Stdio::piped())
         .spawn()
