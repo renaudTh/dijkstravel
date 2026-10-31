@@ -24,8 +24,9 @@ fn encoder(width: u32, height: u32) -> Vec<&'static str> {
     // Mêmes réglages que l'ancien rendu (Chromium) : qualité et taille de fichier inchangées.
     const X264: &str = "-c:v libx264 -preset veryfast -crf 23";
     // Même qualité que x264 `-crf 23` (SSIM égale sur un passage en relief 4K), fichier un quart plus lourd.
-    const NVENC: &str = "-c:v h264_nvenc -preset p5 -tune hq -rc vbr -cq 30 -b:v 0 -bf 3 -spatial-aq 1 \
-                         -temporal-aq 1 -profile:v high";
+    // `p4` : qualité de `p5` (avec ou sans `-temporal-aq`, sans effet ici), une fois et demie plus vite ;
+    // en 4K60, `p5` était ce qui freinait le rendu.
+    const NVENC: &str = "-c:v h264_nvenc -preset p4 -tune hq -rc vbr -cq 30 -b:v 0 -bf 3 -spatial-aq 1 -profile:v high";
     let settings = if width.max(height) <= NVENC_MAX_SIDE && nvenc() { NVENC } else { X264 };
     settings.split_whitespace().collect()
 }
