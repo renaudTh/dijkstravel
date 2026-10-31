@@ -5,6 +5,7 @@
 //! Un seul passage GPU à la fois (les images se rendent en parallèle sur le CPU) : textures et maillages
 //! restent en mémoire vidéo d'une image à l'autre.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
@@ -22,6 +23,10 @@ const MESHES: usize = 768;
 /// Échantillons par pixel de l'image : crêtes lisses contre le ciel. La profondeur relue vient d'une
 /// seconde passe à un échantillon, un tampon multi-échantillonné ne se relisant pas.
 const SAMPLES: u32 = 4;
+/// Mémoire du GPU au plus pour les jeux de surfaces de rendu, et leur nombre au plus : plusieurs images
+/// se rendent à la fois, le GPU dessine l'une pendant que les threads relisent les autres.
+const TARGETS_BUDGET: u64 = 1 << 30;
+const MAX_TARGETS: u64 = 3;
 /// Niveaux de mipmap au plus : contre le fourmillement des morceaux lointains vus en rasant.
 const MIP_LEVELS: u32 = 6;
 
@@ -109,7 +114,10 @@ pub struct Gpu {
     chunk_stride: u64,
     textures: Lru<u64, Option<Arc<wgpu::TextureView>>>,
     meshes: Lru<u64, Arc<wgpu::Buffer>>,
-    targets: Mutex<Targets>,
+    /// Jeux de surfaces de rendu, chacun pris par une image à la fois.
+    targets: Vec<Mutex<Targets>>,
+    /// Jeu à essayer en premier, à tour de rôle.
+    next_targets: AtomicUsize,
 }
 
 /// Ce qui ne sert qu'à un passage à la fois.
@@ -281,7 +289,8 @@ impl Gpu {
         queue.write_buffer(&indices, 0, bytemuck::cast_slice(index_data));
         let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment);
         let chunk_stride = (size_of::<ChunkUniform>() as u64).div_ceil(alignment) * alignment;
-        let targets = Mutex::new(Targets::new(&device, width, height));
+        let count = (TARGETS_BUDGET / Targets::bytes(width, height)).clamp(1, MAX_TARGETS);
+        let targets = (0..count).map(|_| Mutex::new(Targets::new(&device, width, height))).collect();
         Ok(Gpu {
             width,
             height,
@@ -298,6 +307,7 @@ impl Gpu {
             textures: Lru::new(TEXTURES),
             meshes: Lru::new(MESHES),
             targets,
+            next_targets: AtomicUsize::new(0),
             device,
             queue,
         })
@@ -365,7 +375,7 @@ impl Gpu {
             })
             .collect();
 
-        let targets = self.targets.lock().unwrap();
+        let targets = self.free_targets();
         let color_view = targets.color.create_view(&Default::default());
         let depth_view = targets.depth.create_view(&Default::default());
         let samples_view = targets.samples.create_view(&Default::default());
@@ -453,29 +463,39 @@ impl Gpu {
                 extent,
             );
         }
-        self.queue.submit([encoder.finish()]);
+        let submission = self.queue.submit([encoder.finish()]);
         for buffer in [&targets.color_readback, &targets.depth_readback] {
             buffer.map_async(wgpu::MapMode::Read, .., |result| result.expect("relecture du relief"));
         }
-        device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).expect("GPU du relief");
+        // Cette image seulement : les autres threads soumettent les leurs pendant ce temps.
+        device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: None }).expect("GPU du relief");
         let (row, tight) = (row as usize, width as usize * 4);
-        let unpad = |buffer: &wgpu::Buffer| {
-            let mapped = buffer.get_mapped_range(..).expect("relecture du relief");
-            let mut out = Vec::with_capacity(tight * height as usize);
-            for line in mapped.chunks(row) {
-                out.extend_from_slice(&line[..tight]);
-            }
-            drop(mapped);
-            buffer.unmap();
-            out
-        };
-        let pixels = unpad(&targets.color_readback);
-        let depth: Vec<f32> = bytemuck::cast_slice(&unpad(&targets.depth_readback)).to_vec();
+        // Une seule copie par tampon : l'image garde ses lignes alignées, la profondeur est relue en
+        // flottants, sans passer par des octets intermédiaires.
+        let mapped = targets.color_readback.get_mapped_range(..).expect("relecture du relief");
+        let pixels = skia_safe::Data::new_copy(&mapped[..row * height as usize]);
+        drop(mapped);
+        targets.color_readback.unmap();
+        let mapped = targets.depth_readback.get_mapped_range(..).expect("relecture du relief");
+        let mut depth: Vec<f32> = Vec::with_capacity(width as usize * height as usize);
+        for line in mapped.chunks(row) {
+            depth.extend_from_slice(bytemuck::cast_slice(&line[..tight]));
+        }
+        drop(mapped);
+        targets.depth_readback.unmap();
         drop(targets);
         let info = ImageInfo::new((width as i32, height as i32), ColorType::RGBA8888, AlphaType::Premul, None);
-        let image = skia_safe::images::raster_from_data(&info, skia_safe::Data::new_copy(&pixels), tight)
-            .expect("image du relief");
+        let image = skia_safe::images::raster_from_data(&info, pixels, row).expect("image du relief");
         Rendered { image, depth }
+    }
+
+    /// Un jeu de surfaces libre, sinon le suivant à tour de rôle dès qu'il se libère.
+    fn free_targets(&self) -> std::sync::MutexGuard<'_, Targets> {
+        let count = self.targets.len();
+        let start = self.next_targets.fetch_add(1, Ordering::Relaxed);
+        (0..count)
+            .find_map(|i| self.targets[(start + i) % count].try_lock().ok())
+            .unwrap_or_else(|| self.targets[start % count].lock().unwrap())
     }
 
     fn uniform_buffer(&self, label: &str, data: &[u8]) -> wgpu::Buffer {
@@ -563,6 +583,12 @@ impl Gpu {
 }
 
 impl Targets {
+    /// Mémoire d'un jeu : image et profondeur multi-échantillonnées, résolues, et leurs relectures.
+    fn bytes(width: u32, height: u32) -> u64 {
+        let pixels = u64::from(width) * u64::from(height);
+        pixels * 4 * (2 * u64::from(SAMPLES) + 2) + 2 * u64::from(padded_row(width)) * u64::from(height)
+    }
+
     fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
         let target = |label: &str, format: wgpu::TextureFormat, sample_count: u32| {
             device.create_texture(&wgpu::TextureDescriptor {
