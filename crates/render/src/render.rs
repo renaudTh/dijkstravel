@@ -11,6 +11,7 @@ use crate::atlas::Atlas;
 use crate::color::parse_color;
 use crate::frame::{Animation, Camera, Moment};
 use crate::hud::{Hud, HudFrame, Profile};
+use crate::light::Sun;
 use crate::localities::Localities;
 use crate::markers::Markers;
 use crate::mercator::{Projection, Scaled};
@@ -88,12 +89,20 @@ impl Renderer {
         let animation = Animation::new(tour.clone(), &input.video, &theme.camera);
         // Le fond se rend à la taille réelle : son zoom gagne l'échelle de l'image sur la référence.
         let travel_zoom = animation.travel_zoom() + input.video.scale().log2();
+        // Sous le soleil, le relief s'éclaire sur le GPU : l'ombrage de l'atlas s'efface d'autant.
+        let ground = {
+            let mut ground = input.clone();
+            if theme.camera.pitch > 0.0 {
+                ground.theme.basemap.hillshade *= 1.0 - theme.camera.sunlight.clamp(0.0, 1.0);
+            }
+            ground
+        };
         let atlas = match previous {
-            Some(previous) if previous.atlas.serves(travel_zoom, &input) => previous.atlas.clone(),
-            _ => Arc::new(Atlas::new(travel_zoom, &input)),
+            Some(previous) if previous.atlas.serves(travel_zoom, &ground) => previous.atlas.clone(),
+            _ => Arc::new(Atlas::new(travel_zoom, &ground)),
         };
         let transfer_atlas = input.transfer_imagery.clone().filter(|_| !tour.transfers.is_empty()).map(|imagery| {
-            let mut transfer = input.clone();
+            let mut transfer = ground.clone();
             transfer.imagery = imagery;
             transfer.sea_imagery = None;
             Atlas::new(travel_zoom, &transfer)
@@ -379,7 +388,11 @@ impl Frames for Renderer {
             self.hold_pitches();
             let perspective = terrain.perspective(camera, width, height);
             let transfer = self.transfer_atlas.as_ref().map(|transfer| (transfer, blend));
-            let rendered = terrain.render(&self.atlas, transfer, &perspective, canvas);
+            let light = &self.input.theme.camera;
+            let progress = f64::from(frame) / f64::from(self.frame_count().saturating_sub(1).max(1));
+            let course = light.sun_from + (light.sun_to - light.sun_from) * progress;
+            let sun = (light.sunlight > 0.0).then(|| Sun::at(course, camera.center[1], light.sunlight));
+            let rendered = terrain.render(&self.atlas, transfer, &perspective, sun, canvas);
             let lift = self.input.theme.route.width / 2.0 * self.input.video.scale();
             let projection = terrain.projection(&self.atlas, &perspective, &rendered.depth, rendered.depth_size, lift);
             self.draw_overlays(canvas, &projection, frame, with_hud);

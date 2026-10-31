@@ -3,7 +3,8 @@
 //! La vue est à plat ; `--3d` la rend en relief, caméra inclinée et un peu plus serrée, dans `video-3d.mp4`.
 //! `--zoom n` rapproche la caméra du parcours n fois (`video-zoom-<n>.mp4`) ; `--no-hud` la rend sans la
 //! carte d'infos (`video-sans-carte.mp4`) ; `--width l --height h` en l × h pixels (`video-<l>x<h>.mp4`) ;
-//! `--fps n` à n images par seconde (`video-<n>fps.mp4`). `--duration n` rend une variante de n secondes de trajet, dans
+//! `--fps n` à n images par seconde (`video-<n>fps.mp4`) ; `--sun a,b`, avec `--3d`, éclairé par le soleil
+//! de la position a à la position b de sa course du jour (`video-3d-soleil-<a>-<b>.mp4`). `--duration n` rend une variante de n secondes de trajet, dans
 //! `video-<n>s.mp4` ; `--stop-slowdown n` une variante qui freine autant aux lieux, dans
 //! `video-ralenti-<n>.mp4`. Un dossier qui contient
 //! `montage.json` se rend comme un montage (`montage.rs`).
@@ -83,6 +84,9 @@ pub struct Variant {
     pub size: Option<(u32, u32)>,
     /// Images par seconde, à la place de `fps` du run.
     pub fps: Option<u32>,
+    /// Relief éclairé par le soleil (`camera.sunlight` à 1), de cette position sur sa course du jour à
+    /// celle-ci (`camera.sunFrom`, `camera.sunTo`), avec `--3d`.
+    pub sun: Option<(f64, f64)>,
     /// Multiplie `camera.zoom` du thème : la caméra du parcours se rapproche d'autant, son lissage ne change pas.
     pub zoom: Option<f64>,
 }
@@ -95,6 +99,7 @@ impl Variant {
         let none = if self.no_slowdown { " --no-slowdown" } else { "" };
         let relief = if self.relief { " --3d" } else { "" };
         let zoom = self.zoom.map(|zoom| format!(" --zoom {zoom}"));
+        let sun = self.sun.map(|(from, to)| format!(" --sun {from},{to}"));
         let hud = if self.no_hud { " --no-hud" } else { "" };
         let size = self.size.map(|(width, height)| format!(" --width {width} --height {height}"));
         let fps = self.fps.map(|fps| format!(" --fps {fps}"));
@@ -103,6 +108,7 @@ impl Variant {
             + none
             + relief
             + &zoom.unwrap_or_default()
+            + &sun.unwrap_or_default()
             + hud
             + &size.unwrap_or_default()
             + &fps.unwrap_or_default()
@@ -122,13 +128,26 @@ impl Variant {
             (true, pitch) if pitch > 0.0 => pitch,
             (true, _) => RELIEF_PITCH,
         };
+        if let Some((from, to)) = self.sun {
+            theme.camera.sunlight = 1.0;
+            theme.camera.sun_from = from;
+            theme.camera.sun_to = to;
+        }
         theme.camera.zoom *= self.zoom.unwrap_or(1.0) * if self.relief { RELIEF_ZOOM } else { 1.0 };
     }
 
     /// Suffixe d'une image seule (`--frame`) : relief, zoom, taille et cadence (l'image n n'est pas au même
     /// instant) ; sans carte, elle garde son nom.
     fn frame_suffix(&self) -> String {
-        Variant { relief: self.relief, zoom: self.zoom, size: self.size, fps: self.fps, ..Variant::default() }.suffix()
+        Variant {
+            relief: self.relief,
+            zoom: self.zoom,
+            sun: self.sun,
+            size: self.size,
+            fps: self.fps,
+            ..Variant::default()
+        }
+        .suffix()
     }
 
     /// Suffixe des fichiers rendus, `-60s-ralenti-2-3d-zoom-1.5-sans-carte-1080x1080-60fps`.
@@ -138,6 +157,7 @@ impl Variant {
         let none = if self.no_slowdown { "-sans-ralenti" } else { "" };
         let relief = if self.relief { "-3d" } else { "" };
         let zoom = self.zoom.map(|zoom| format!("-zoom-{zoom}"));
+        let sun = self.sun.map(|(from, to)| format!("-soleil-{from}-{to}"));
         let hud = if self.no_hud { "-sans-carte" } else { "" };
         let size = self.size.map(|(width, height)| format!("-{width}x{height}"));
         let fps = self.fps.map(|fps| format!("-{fps}fps"));
@@ -146,6 +166,7 @@ impl Variant {
             + none
             + relief
             + &zoom.unwrap_or_default()
+            + &sun.unwrap_or_default()
             + hud
             + &size.unwrap_or_default()
             + &fps.unwrap_or_default()
@@ -190,17 +211,24 @@ pub fn main(arg: &Path, seconds: Option<f64>, variant: Variant, threads: Option<
     if variant.fps.is_some_and(|fps| !(1..=120).contains(&fps)) {
         return fail("--fps attend un entier de 1 à 120");
     }
+    if variant.sun.is_some() && !variant.relief {
+        return fail("--sun éclaire le relief : il va avec --3d");
+    }
+    if variant.sun.is_some_and(|(from, to)| ![from, to].iter().all(|angle| (1.0..=179.0).contains(angle))) {
+        return fail("--sun attend deux angles de 1 à 179 (0 : lever, 90 : midi, 180 : coucher), --sun 20,140");
+    }
     if montage::is_montage(arg) {
         if variant.duration.is_some()
             || variant.stop_slowdown.is_some()
             || variant.no_slowdown
             || variant.relief
             || variant.zoom.is_some()
+            || variant.sun.is_some()
             || variant.size.is_some()
             || variant.fps.is_some()
         {
             return fail(
-                "--duration, --stop-slowdown, --no-slowdown, --3d, --zoom, --width, --height et --fps ne s'appliquent pas à un montage : régler chaque segment et son thème",
+                "--duration, --stop-slowdown, --no-slowdown, --3d, --zoom, --sun, --width, --height et --fps ne s'appliquent pas à un montage : régler chaque segment et son thème",
             );
         }
         return montage::render(arg, seconds, threads, frame, !variant.no_hud);

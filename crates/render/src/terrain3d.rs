@@ -14,6 +14,7 @@ use crate::elevation::Elevation;
 use crate::frame::Camera;
 use crate::geo::LonLat;
 use crate::gpu::{ChunkDraw, FrameSettings, Gpu, Rendered};
+use crate::light::Sun;
 use crate::mercator::Projection;
 use crate::mesh::Meshes;
 use crate::model::BasemapTheme;
@@ -24,6 +25,11 @@ const EXTRA_LEVELS: u32 = 6;
 /// Ciel et brume, avant le voile du thème.
 const SKY: &str = "#7fa9d6";
 const HAZE: &str = "#dfe8f0";
+/// Les ombres portées couvrent le sol vu jusqu'à cette distance du point visé, en distances de la caméra :
+/// au-delà, la brume les noie et la carte des ombres serait trop lâche près de la caméra.
+const SHADOW_REACH: f64 = 3.0;
+/// Altitude au plus au-dessus ou au-dessous du point visé que la carte des ombres doit contenir, en mètres.
+const SHADOW_RELIEF: f64 = 4000.0;
 /// Un point est caché si le relief devant lui est plus proche de cette part de sa distance.
 const OCCLUSION_MARGIN: f64 = 0.01;
 
@@ -109,6 +115,7 @@ impl Terrain3d {
         atlas: &Atlas,
         transfer: Option<(&Atlas, f64)>,
         perspective: &Perspective,
+        sun: Option<Sun>,
         canvas: &skia_safe::Canvas,
     ) -> Rendered {
         let chunks = self.chunks(atlas, perspective);
@@ -116,18 +123,26 @@ impl Terrain3d {
         let side = f64::from(CHUNK + 2 * APRON);
         let eye = perspective.eye();
         let view_projection = perspective.view_projection().to_cols_array_2d().map(|c| c.map(|v| v as f32));
+        let (haze, sky) = sun.map_or((self.haze, self.sky), |sun| sun.atmosphere(self.haze, self.sky));
         let settings = FrameSettings {
             view_projection,
             eye: [eye.x as f32, eye.y as f32, eye.z as f32],
             z_per_meter: perspective.z_per_meter() as f32,
             ground: perspective.ground() as f32,
             fog: perspective.fog().map(|distance| distance as f32),
-            fog_color: self.haze,
-            sky_color: self.sky,
+            fog_color: haze,
+            sky_color: sky,
             horizon: perspective.horizon() as f32,
             transfer_blend: transfer.map_or(0.0, |(_, blend)| blend as f32),
             uv_inset: (f64::from(APRON) / side) as f32,
             uv_scale: (f64::from(CHUNK) / side) as f32,
+            inverse_view_projection: perspective
+                .inverse_view_projection()
+                .to_cols_array_2d()
+                .map(|c| c.map(|v| v as f32)),
+            exaggeration: self.exaggeration as f32,
+            light: sun.map(|sun| sun.light()).unwrap_or_default(),
+            shadow: sun.map(|sun| sun_view(perspective, sun.light().direction)),
         };
         let meshes: Vec<_> = chunks.iter().map(|&key| move || self.meshes.mesh(key)).collect();
         let images: Vec<_> = chunks.iter().map(|&key| move || atlas.layers(key)).collect();
@@ -329,6 +344,28 @@ impl LocalRect {
         let axes = [DVec2::X, DVec2::Y].into_iter().chain(edges.map(|e| e.perp()));
         !axes.into_iter().any(separated)
     }
+}
+
+/// Vue orthographique du relief depuis le soleil (`direction` : vers lui, en repère local), cadrée sur le sol
+/// vu autour du point visé ; et le côté d'un pixel de la carte des ombres, en repère local.
+fn sun_view(perspective: &Perspective, direction: [f32; 3]) -> ([[f32; 4]; 4], f32) {
+    use glam::DVec3;
+    use glam::dcamera::rh::{proj, view};
+    let ground = perspective.ground();
+    let reach = perspective
+        .ground_footprint()
+        .into_iter()
+        .map(|point| perspective.local(point, ground).truncate().length())
+        .fold(0.0, f64::max)
+        .min(SHADOW_REACH * perspective.distance());
+    // Sphère qui contient le sol couvert et son relief : la vue la contient sous tout angle du soleil.
+    let radius = reach.hypot(SHADOW_RELIEF * perspective.z_per_meter()).max(1.0);
+    let toward_sun = DVec3::new(f64::from(direction[0]), f64::from(direction[1]), f64::from(direction[2])).normalize();
+    let up = if toward_sun.z.abs() > 0.99 { DVec3::Y } else { DVec3::Z };
+    let look = view::look_at_mat4(toward_sun * 2.0 * radius, DVec3::ZERO, up);
+    let projection = proj::directx::orthographic(-radius, radius, -radius, radius, radius, 3.0 * radius);
+    let matrix = (projection * look).to_cols_array_2d().map(|column| column.map(|v| v as f32));
+    (matrix, (2.0 * radius / f64::from(crate::gpu::SHADOW_SIZE)) as f32)
 }
 
 fn hash(value: impl Hash) -> u64 {

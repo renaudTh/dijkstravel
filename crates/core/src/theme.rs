@@ -147,6 +147,15 @@ pub struct CameraTheme {
     pub heading_window: f64,
     /// Exagération du relief de la vue inclinée.
     pub terrain_exaggeration: f64,
+    /// Éclairage du relief de la vue inclinée par le soleil, de 0 (l'ombrage du fond tel quel) à 1 : chaque
+    /// versant s'éclaire selon qu'il lui fait face, sa lumière rougit quand il est bas, le ciel et la brume
+    /// se teintent vers lui.
+    pub sunlight: f64,
+    /// Position du soleil sur sa course du jour au début et à la fin de la vidéo, en degrés : 0 à son lever
+    /// à l'est, 90 au plus haut au sud, 180 à son coucher à l'ouest (sa vraie course à la latitude du
+    /// parcours).
+    pub sun_from: f64,
+    pub sun_to: f64,
 }
 
 /// Imagerie du fond : `nasa` (Blue Marble, pays et régions), `ign` (orthophoto, villes de France),
@@ -160,7 +169,7 @@ pub const SEA_IMAGERIES: [&str; 4] = ["", "nasa", "ign", "sentinel"];
 pub const HUD_FONTS: [&str; 6] = ["Nunito", "Quicksand", "Fredoka", "Baloo 2", "Poppins", "Comfortaa"];
 
 /// Bornes des réglages numériques, partagées par la validation et les curseurs de l'éditeur.
-pub const NUMBER_RANGES: [(&str, f64, f64); 25] = [
+pub const NUMBER_RANGES: [(&str, f64, f64); 28] = [
     ("route.width", 2.0, 40.0),
     ("route.coreRatio", 0.0, 1.0),
     ("route.coreBlurRatio", 0.0, 1.0),
@@ -186,6 +195,9 @@ pub const NUMBER_RANGES: [(&str, f64, f64); 25] = [
     ("camera.pitch", 0.0, 70.0),
     ("camera.headingWindow", 0.2, 4.0),
     ("camera.terrainExaggeration", 1.0, 3.0),
+    ("camera.sunlight", 0.0, 1.0),
+    ("camera.sunFrom", 1.0, 179.0),
+    ("camera.sunTo", 1.0, 179.0),
 ];
 
 impl Default for Theme {
@@ -263,6 +275,9 @@ impl Default for Theme {
                 pitch: 0.0,
                 heading_window: 1.0,
                 terrain_exaggeration: 1.0,
+                sunlight: 0.0,
+                sun_from: 150.0,
+                sun_to: 178.0,
             },
         }
     }
@@ -414,6 +429,9 @@ impl Theme {
                 pitch: r.number("camera.pitch", d.camera.pitch),
                 heading_window: r.number("camera.headingWindow", d.camera.heading_window),
                 terrain_exaggeration: r.number("camera.terrainExaggeration", d.camera.terrain_exaggeration),
+                sunlight: r.number("camera.sunlight", d.camera.sunlight),
+                sun_from: r.number("camera.sunFrom", d.camera.sun_from),
+                sun_to: r.number("camera.sunTo", d.camera.sun_to),
             },
         };
         if r.issues.is_empty() { Ok(theme) } else { Err(r.issues) }

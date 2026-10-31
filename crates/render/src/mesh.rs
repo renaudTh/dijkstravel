@@ -21,8 +21,9 @@ const SKIRT_SHARE: f64 = 1.0 / 16.0;
 const ZOOMS_BELOW_LEVEL: f64 = 2.0;
 const EARTH_CIRCUMFERENCE: f64 = 40_075_016.686;
 
-/// Sommet : position dans le morceau (0 à 1, aussi coordonnée de texture) et altitude en mètres.
-pub type Vertex = [f32; 3];
+/// Sommet : position dans le morceau (0 à 1, aussi coordonnée de texture), altitude en mètres, puis pente
+/// du relief vers l'est et vers le nord (mètres par mètre), pour l'éclairer.
+pub type Vertex = [f32; 5];
 
 pub struct Meshes {
     elevation: Arc<Elevation>,
@@ -55,20 +56,34 @@ impl Meshes {
             let chunk = f64::from(CHUNK);
             let cell = chunk / GRID as f64;
             let (x0, y0) = (key.x as f64 * chunk, key.y as f64 * chunk);
-            let mut vertices: Vec<Vertex> = Vec::with_capacity((GRID + 1) * (GRID + 1) + 4 * GRID);
-            for j in 0..=GRID {
-                for i in 0..=GRID {
-                    let (x, y) = (x0 + i as f64 * cell, y0 + j as f64 * cell);
-                    let altitude = self.elevation.altitude_at_pixel(z, x * to_dem - 0.5, y * to_dem - 0.5);
-                    vertices.push([i as f32 / GRID as f32, j as f32 / GRID as f32, altitude as f32]);
-                }
+            // Altitudes de la grille et d'un tour de cellules autour : les pentes du bord se calculent comme
+            // celles du milieu, et deux morceaux voisins s'éclairent sans couture.
+            const SIDE: usize = GRID + 3;
+            let mut altitudes = vec![0f64; SIDE * SIDE];
+            for (index, altitude) in altitudes.iter_mut().enumerate() {
+                let (i, j) = ((index % SIDE) as f64 - 1.0, (index / SIDE) as f64 - 1.0);
+                let (x, y) = (x0 + i * cell, y0 + j * cell);
+                *altitude = self.elevation.altitude_at_pixel(z, x * to_dem - 0.5, y * to_dem - 0.5);
             }
             let latitude = unproject([x0 + chunk / 2.0, y0 + chunk / 2.0], level_zoom)[1];
             let chunk_meters = chunk * EARTH_CIRCUMFERENCE * latitude.to_radians().cos() / world_size(level_zoom);
+            let cell_meters = chunk_meters / GRID as f64;
+            let mut vertices: Vec<Vertex> = Vec::with_capacity((GRID + 1) * (GRID + 1) + 4 * GRID);
+            for j in 0..=GRID {
+                for i in 0..=GRID {
+                    let at = |i: usize, j: usize| altitudes[j * SIDE + i];
+                    let (i1, j1) = (i + 1, j + 1);
+                    let east = (at(i1 + 1, j1) - at(i1 - 1, j1)) / (2.0 * cell_meters);
+                    // Les lignes vont vers le sud.
+                    let north = (at(i1, j1 - 1) - at(i1, j1 + 1)) / (2.0 * cell_meters);
+                    let (u, v) = (i as f32 / GRID as f32, j as f32 / GRID as f32);
+                    vertices.push([u, v, at(i1, j1) as f32, east as f32, north as f32]);
+                }
+            }
             let depth = (chunk_meters * SKIRT_SHARE) as f32;
             for &index in perimeter() {
-                let [u, v, altitude] = vertices[index as usize];
-                vertices.push([u, v, altitude - depth]);
+                let [u, v, altitude, east, north] = vertices[index as usize];
+                vertices.push([u, v, altitude - depth, east, north]);
             }
             Arc::new(vertices)
         })
@@ -103,9 +118,10 @@ impl Meshes {
         let level_zoom = self.level_zoom(key.level);
         let chunk = f64::from(CHUNK);
         let (x0, y0) = (key.x as f64 * chunk, key.y as f64 * chunk);
-        // Le bord droit et le bas du morceau lisent le premier pixel de la tuile voisine.
+        // Les pentes lisent une cellule de plus autour du morceau, et le bord droit et le bas le pixel suivant.
         let margin = world_size(level_zoom) / ((DIM as f64) * f64::from(1u32 << self.tile_zoom(key.level)));
-        let bounds = [x0, y0, x0 + chunk + margin, y0 + chunk + margin];
+        let cell = chunk / GRID as f64;
+        let bounds = [x0 - cell, y0 - cell, x0 + chunk + cell + margin, y0 + chunk + cell + margin];
         let name = &self.elevation.name;
         let tiles = self.elevation.tiles_covering(self.tile_zoom(key.level), level_zoom, bounds, 0);
         let parents = Elevation::parent_tiles(&tiles);

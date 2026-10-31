@@ -68,6 +68,12 @@ enum Command {
         /// de `--3d` ; écrit `video-zoom-<n>.mp4`.
         #[arg(long)]
         zoom: Option<f64>,
+        /// Avec `--3d`, relief éclairé par le soleil, de la position a à la position b de sa course du jour
+        /// pendant la vidéo : 0 à son lever à l'est, 90 à midi, 180 à son coucher à l'ouest (`--sun 20,140` :
+        /// du matin à la fin d'après-midi ; `--sun 150,178` : coucher de soleil) ; écrit
+        /// `video-3d-soleil-<a>-<b>.mp4`.
+        #[arg(long, value_name = "A,B", value_parser = angles)]
+        sun: Option<(f64, f64)>,
         /// Largeur de la vidéo en pixels, à la place du format du run, avec `--height` ; écrit
         /// `video-<l>x<h>.mp4`. Tout se met à l'échelle : 2160 × 3840, c'est la vidéo 1080 × 1920 en 4K.
         #[arg(long, requires = "height")]
@@ -103,6 +109,9 @@ enum Command {
         /// Envoie la variante rendue avec `render --zoom n`.
         #[arg(long)]
         zoom: Option<f64>,
+        /// Envoie la variante éclairée par le soleil (`render --3d --sun a,b`).
+        #[arg(long, value_name = "A,B", value_parser = angles)]
+        sun: Option<(f64, f64)>,
         /// Envoie la variante sans carte d'infos (`render --no-hud`).
         #[arg(long)]
         no_hud: bool,
@@ -117,6 +126,15 @@ enum Command {
     },
     /// Éditeur du thème du run, sur sa tournée déjà calculée, dans le navigateur.
     Editor { run: PathBuf },
+}
+
+/// `a,b` : deux nombres séparés par une virgule.
+fn angles(value: &str) -> Result<(f64, f64), String> {
+    let parse = |text: &str| text.trim().parse::<f64>().map_err(|_| format!("{text} n'est pas un nombre"));
+    match value.split_once(',') {
+        Some((a, b)) => Ok((parse(a)?, parse(b)?)),
+        None => Err(format!("deux angles séparés par une virgule attendus, comme 20,140 (reçu {value})")),
+    }
 }
 
 fn validate(arg: &std::path::Path) -> Outcome {
@@ -141,6 +159,7 @@ fn main() -> ExitCode {
             no_hud,
             relief,
             zoom,
+            sun,
             width,
             height,
             fps,
@@ -153,6 +172,7 @@ fn main() -> ExitCode {
                 no_slowdown,
                 relief,
                 zoom,
+                sun,
                 no_hud,
                 size: width.zip(height),
                 fps,
@@ -162,21 +182,32 @@ fn main() -> ExitCode {
         ),
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
-        Command::Upload { run, duration, stop_slowdown, no_slowdown, relief, zoom, no_hud, width, height, fps } => {
-            upload::main(
-                &run,
-                render::Variant {
-                    duration,
-                    stop_slowdown,
-                    no_slowdown,
-                    relief,
-                    zoom,
-                    no_hud,
-                    size: width.zip(height),
-                    fps,
-                },
-            )
-        }
+        Command::Upload {
+            run,
+            duration,
+            stop_slowdown,
+            no_slowdown,
+            relief,
+            zoom,
+            sun,
+            no_hud,
+            width,
+            height,
+            fps,
+        } => upload::main(
+            &run,
+            render::Variant {
+                duration,
+                stop_slowdown,
+                no_slowdown,
+                relief,
+                zoom,
+                sun,
+                no_hud,
+                size: width.zip(height),
+                fps,
+            },
+        ),
         Command::Editor { run } => editor::main(&run),
     };
     match outcome {

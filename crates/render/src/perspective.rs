@@ -199,6 +199,10 @@ impl Perspective {
     }
 
     /// Matrice monde local → écran, pour le GPU (repère local centré sur le point visé).
+    pub fn inverse_view_projection(&self) -> DMat4 {
+        self.inverse
+    }
+
     pub fn view_projection(&self) -> DMat4 {
         self.view_projection
     }

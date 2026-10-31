@@ -148,6 +148,9 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'range', path: 'camera.pitch', label: 'Inclinaison (0 : à plat)', step: 1 },
       { kind: 'range', path: 'camera.headingWindow', label: 'Lissage du cap, en écrans', step: 0.1 },
       { kind: 'range', path: 'camera.terrainExaggeration', label: 'Exagération du relief', step: 0.1 },
+      { kind: 'range', path: 'camera.sunlight', label: 'Éclairage du relief par le soleil', step: 0.05 },
+      { kind: 'range', path: 'camera.sunFrom', label: 'Soleil au début (0 : lever, 90 : midi, 180 : coucher)', step: 1 },
+      { kind: 'range', path: 'camera.sunTo', label: 'Soleil à la fin', step: 1 },
     ],
   },
 ];

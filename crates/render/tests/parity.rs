@@ -129,6 +129,9 @@ fn check(file: &Path) {
             pitch: 0.0,
             heading_window: 1.0,
             terrain_exaggeration: 1.0,
+            sunlight: 0.0,
+            sun_from: 150.0,
+            sun_to: 178.0,
         },
     );
     assert_eq!(animation.timeline.frame_count(), fixture.frame_count, "{name} : nombre d'images");

@@ -33,6 +33,9 @@ const SAMPLES: u32 = 4;
 /// relecture a les siens, pendant que le GPU dessine les suivantes.
 const READBACK_BUDGET: u64 = 1 << 29;
 const MAX_READBACKS: u64 = 8;
+/// Côté de la carte des ombres, vue depuis le soleil.
+pub const SHADOW_SIZE: u32 = 4096;
+
 /// Niveaux de mipmap au plus : contre le fourmillement des morceaux lointains vus en rasant.
 pub(crate) const MIP_LEVELS: u32 = 6;
 
@@ -59,6 +62,28 @@ pub struct FrameSettings {
     /// Bordure de la texture d'un morceau, et son côté utile, en part de la texture.
     pub uv_inset: f32,
     pub uv_scale: f32,
+    /// Écran → repère local, pour la direction de chaque pixel du ciel.
+    pub inverse_view_projection: [[f32; 4]; 4],
+    /// Exagération du relief : les pentes des maillages en prennent autant.
+    pub exaggeration: f32,
+    pub light: Light,
+    /// Repère local → carte des ombres (vue orthographique depuis le soleil), et côté d'un de ses pixels en
+    /// repère local ; aucune ombre portée sans.
+    pub shadow: Option<([[f32; 4]; 4], f32)>,
+}
+
+/// Lumière du soleil sur le relief (`light::Sun`) ; sans effet à `strength` nulle.
+#[derive(Clone, Copy, Default)]
+pub struct Light {
+    /// Vers le soleil, en repère local, unitaire.
+    pub direction: [f32; 3],
+    /// De 0 (les couleurs de l'atlas telles quelles) à 1 (éclairées par le soleil et le ciel).
+    pub strength: f32,
+    /// Lumière directe du soleil et lumière du ciel, RVB.
+    pub sun: [f32; 3],
+    pub ambient: [f32; 3],
+    /// Gain sur le relief éclairé : le soleil couchant reste lisible.
+    pub exposure: f32,
 }
 
 /// Un morceau d'atlas à dessiner.
@@ -102,6 +127,13 @@ struct FrameUniform {
     sky_color: [f32; 4],
     params: [f32; 4],
     uv: [f32; 4],
+    inverse_view_projection: [[f32; 4]; 4],
+    sun: [f32; 4],
+    sun_color: [f32; 4],
+    ambient: [f32; 4],
+    light_view_projection: [[f32; 4]; 4],
+    /// x : côté d'un pixel de la carte des ombres en repère local ; y : 1 si elle est dessinée.
+    shadow: [f32; 4],
 }
 
 #[repr(C)]
@@ -120,6 +152,11 @@ pub struct Gpu {
     /// Le relief sans couleur, à un échantillon : la profondeur relue.
     terrain_depth: wgpu::RenderPipeline,
     frame_layout: wgpu::BindGroupLayout,
+    /// Le relief vu depuis le soleil, en profondeur seule : la carte des ombres.
+    shadow: wgpu::RenderPipeline,
+    shadow_layout: wgpu::BindGroupLayout,
+    /// Compare la profondeur d'un point vu du soleil à celle de la carte des ombres, filtrée.
+    shadow_sampler: wgpu::Sampler,
     chunk_layout: wgpu::BindGroupLayout,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -146,6 +183,7 @@ struct Targets {
     samples_depth: wgpu::Texture,
     color: wgpu::Texture,
     depth: wgpu::Texture,
+    shadow: wgpu::Texture,
 }
 
 /// L'image et sa profondeur copiées pour être relues.
@@ -225,7 +263,27 @@ impl Gpu {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
             ],
+        });
+        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ombres"),
+            entries: &[uniform(0, wgpu::ShaderStages::VERTEX, false)],
         });
         let chunk_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("morceau"),
@@ -286,12 +344,49 @@ impl Gpu {
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2],
         };
         let sky = pipeline("sky_vertex", Some("sky_fragment"), &[], false, SAMPLES);
         let terrain =
             pipeline("terrain_vertex", Some("terrain_fragment"), &[Some(vertex_layout.clone())], true, SAMPLES);
-        let terrain_depth = pipeline("terrain_vertex", None, &[Some(vertex_layout)], true, 1);
+        let terrain_depth = pipeline("terrain_vertex", None, &[Some(vertex_layout.clone())], true, 1);
+        let shadow_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("ombres"),
+            bind_group_layouts: &[Some(&shadow_layout), Some(&chunk_layout)],
+            immediate_size: 0,
+        });
+        let shadow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ombres"),
+            layout: Some(&shadow_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("shadow_vertex"),
+                compilation_options: Default::default(),
+                buffers: &[Some(vertex_layout)],
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                // Contre l'acné : un versant ne s'ombre pas lui-même.
+                bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
+            }),
+            multisample: Default::default(),
+            fragment: None,
+            multiview_mask: None,
+            cache: None,
+        });
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ombres"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("morceaux"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -322,6 +417,9 @@ impl Gpu {
             terrain,
             terrain_depth,
             frame_layout,
+            shadow,
+            shadow_layout,
+            shadow_sampler,
             chunk_layout,
             texture_layout,
             sampler,
@@ -343,6 +441,7 @@ impl Gpu {
     /// L'image se dessine dans `canvas`, qu'elle recouvre ; la profondeur est rendue.
     pub fn render(&self, settings: &FrameSettings, chunks: &[ChunkDraw], canvas: &Canvas) -> Rendered {
         let device = &self.device;
+        let light = settings.light;
         let frame = FrameUniform {
             view_projection: settings.view_projection,
             eye: [settings.eye[0], settings.eye[1], settings.eye[2], settings.z_per_meter],
@@ -350,15 +449,18 @@ impl Gpu {
             sky_color: settings.sky_color,
             params: [settings.fog[0], settings.fog[1], settings.horizon, settings.transfer_blend],
             uv: [settings.uv_inset, settings.uv_scale, settings.ground, 0.0],
+            inverse_view_projection: settings.inverse_view_projection,
+            sun: [light.direction[0], light.direction[1], light.direction[2], light.strength],
+            sun_color: [light.sun[0], light.sun[1], light.sun[2], settings.exaggeration],
+            ambient: [light.ambient[0], light.ambient[1], light.ambient[2], light.exposure],
+            light_view_projection: settings.shadow.map_or([[0.0; 4]; 4], |(matrix, _)| matrix),
+            shadow: [settings.shadow.map_or(0.0, |(_, texel)| texel), f32::from(settings.shadow.is_some()), 0.0, 0.0],
         };
         let frame_buffer = self.uniform_buffer("image", bytemuck::bytes_of(&frame));
-        let frame_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("image"),
-            layout: &self.frame_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: frame_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
-            ],
+        let shadow_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ombres"),
+            layout: &self.shadow_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: frame_buffer.as_entire_binding() }],
         });
         let stride = self.chunk_stride as usize;
         let mut chunk_data = vec![0u8; stride * chunks.len().max(1)];
@@ -410,7 +512,41 @@ impl Gpu {
         let depth_view = targets.depth.create_view(&Default::default());
         let samples_view = targets.samples.create_view(&Default::default());
         let samples_depth_view = targets.samples_depth.create_view(&Default::default());
+        let shadow_view = targets.shadow.create_view(&Default::default());
+        let frame_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("image"),
+            layout: &self.frame_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: frame_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&shadow_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.shadow_sampler) },
+            ],
+        });
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("relief") });
+        if settings.shadow.is_some() {
+            // Le relief vu depuis le soleil : ce qu'il voit est au soleil, le reste à l'ombre.
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("ombres"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &shadow_view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.shadow);
+            pass.set_bind_group(0, &shadow_group, &[]);
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            for (i, (_, mesh)) in draws.iter().enumerate() {
+                pass.set_bind_group(1, &chunk_group, &[(i * stride) as u32]);
+                pass.set_vertex_buffer(0, mesh.slice(..));
+                pass.draw_indexed(0..self.index_count, 0, 0..1);
+            }
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("relief"),
@@ -664,6 +800,16 @@ impl Targets {
             color: target("image", TARGET_FORMAT, 1),
             // La passe de profondeur se rend à sa propre taille : même vue, moins de pixels.
             depth: sized(depth_size(width, height), "profondeur", DEPTH_FORMAT, 1),
+            shadow: device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("ombres"),
+                size: wgpu::Extent3d { width: SHADOW_SIZE, height: SHADOW_SIZE, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            }),
         }
     }
 }
@@ -754,8 +900,8 @@ mod tests {
         let perspective = Perspective::new(camera, width, height, 0.0, 1.0);
         let flat: Arc<Vec<Vertex>> = Arc::new(
             (0..=GRID)
-                .flat_map(|j| (0..=GRID).map(move |i| [i as f32 / GRID as f32, j as f32 / GRID as f32, 0.0]))
-                .chain((0..4 * GRID).map(|_| [0.0, 0.0, -10.0]))
+                .flat_map(|j| (0..=GRID).map(move |i| [i as f32 / GRID as f32, j as f32 / GRID as f32, 0.0, 0.0, 0.0]))
+                .chain((0..4 * GRID).map(|_| [0.0, 0.0, -10.0, 0.0, 0.0]))
                 .collect(),
         );
         let mesh = || flat.clone();
@@ -782,6 +928,10 @@ mod tests {
             transfer_blend: 0.0,
             uv_inset: 0.0,
             uv_scale: 1.0,
+            inverse_view_projection: to_f32(perspective.view_projection().inverse()),
+            exaggeration: 1.0,
+            light: Light::default(),
+            shadow: None,
         };
         // Un grand morceau centré sur le point visé.
         let size = 4000.0;
