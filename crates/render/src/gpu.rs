@@ -11,10 +11,13 @@ use std::sync::{Arc, Mutex};
 use bytemuck::{Pod, Zeroable};
 use skia_safe::{AlphaType, Canvas, ColorType, Image, ImageInfo};
 
+use crate::atlas::{APRON, CHUNK, ChunkLayers};
+
 use crate::cache::Lru;
+use crate::compose::Composer;
 use crate::mesh::{self, Vertex};
 
-const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub(crate) const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// L'image rendue, dans l'ordre des octets du canevas de Skia (N32 : BGRA) : relue, elle s'y recopie
 /// ligne à ligne sans conversion.
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
@@ -31,7 +34,7 @@ const SAMPLES: u32 = 4;
 const READBACK_BUDGET: u64 = 1 << 29;
 const MAX_READBACKS: u64 = 8;
 /// Niveaux de mipmap au plus : contre le fourmillement des morceaux lointains vus en rasant.
-const MIP_LEVELS: u32 = 6;
+pub(crate) const MIP_LEVELS: u32 = 6;
 
 /// Réglages d'une image, communs à tous les morceaux.
 #[derive(Clone, Copy)]
@@ -70,9 +73,9 @@ pub struct ChunkDraw<'a> {
     pub origin: [f32; 2],
     pub size: f32,
     pub mesh: &'a dyn Fn() -> Arc<Vec<Vertex>>,
-    /// L'image du morceau, lue seulement si sa texture n'est pas déjà sur le GPU.
-    pub image: &'a dyn Fn() -> Image,
-    pub transfer_image: &'a dyn Fn() -> Option<Image>,
+    /// Les calques du morceau, lus seulement si sa texture n'est pas déjà sur le GPU, qui les compose.
+    pub image: &'a dyn Fn() -> ChunkLayers<'a>,
+    pub transfer_image: &'a dyn Fn() -> Option<ChunkLayers<'a>>,
 }
 
 /// La profondeur de l'image rendue (0 au plan proche, 1 au lointain ou dans le ciel), ligne par ligne, à
@@ -125,6 +128,7 @@ pub struct Gpu {
     /// Écart entre deux `ChunkUniform` dans le tampon des morceaux (alignement des décalages dynamiques).
     chunk_stride: u64,
     textures: Lru<u64, Option<Arc<wgpu::TextureView>>>,
+    composer: Composer,
     meshes: Lru<u64, Arc<wgpu::Buffer>>,
     /// Surfaces de rendu, prises le temps d'enregistrer et de soumettre une image : le GPU exécute les
     /// soumissions dans l'ordre, la suivante peut les reprendre aussitôt.
@@ -325,6 +329,7 @@ impl Gpu {
             indices,
             chunk_stride,
             textures: Lru::new(TEXTURES),
+            composer: Composer::new(&device, &queue),
             meshes: Lru::new(MESHES),
             targets,
             readbacks,
@@ -382,7 +387,9 @@ impl Gpu {
                 let transfer = chunk
                     .transfer_key
                     .and_then(|key| {
-                        self.textures.get_or_insert_with(&key, || self.upload_optional(chunk.transfer_image))
+                        self.textures.get_or_insert_with(&key, || {
+                            (chunk.transfer_image)().map(|layers| Arc::new(self.compose(&layers)))
+                        })
                     })
                     .unwrap_or_else(|| main.clone());
                 let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -532,7 +539,8 @@ impl Gpu {
 
     /// Le ciel lit le groupe des textures sans s'en servir : un groupe quelconque, s'il n'y a aucun morceau.
     fn empty_group(&self) -> wgpu::BindGroup {
-        let blank = Arc::new(self.upload(&RgbaImage { width: 1, height: 1, pixels: vec![0; 4] }));
+        let blank =
+            Arc::new(upload(&self.device, &self.queue, &RgbaImage { width: 1, height: 1, pixels: vec![0; 4] }, 1));
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("textures"),
             layout: &self.texture_layout,
@@ -543,14 +551,12 @@ impl Gpu {
         })
     }
 
-    fn texture(&self, key: u64, image: &dyn Fn() -> Image) -> Arc<wgpu::TextureView> {
-        self.textures
-            .get_or_insert_with(&key, || Some(Arc::new(self.upload(&RgbaImage::of(&image())))))
-            .expect("texture du morceau")
+    fn texture<'a>(&self, key: u64, layers: &dyn Fn() -> ChunkLayers<'a>) -> Arc<wgpu::TextureView> {
+        self.textures.get_or_insert_with(&key, || Some(Arc::new(self.compose(&layers())))).expect("texture du morceau")
     }
 
-    fn upload_optional(&self, image: &dyn Fn() -> Option<Image>) -> Option<Arc<wgpu::TextureView>> {
-        image().map(|image| Arc::new(self.upload(&RgbaImage::of(&image))))
+    fn compose(&self, layers: &ChunkLayers) -> wgpu::TextureView {
+        self.composer.compose(layers, (CHUNK + 2 * APRON) as u32)
     }
 
     fn mesh(&self, key: u64, mesh: &dyn Fn() -> Arc<Vec<Vertex>>) -> Arc<wgpu::Buffer> {
@@ -566,41 +572,46 @@ impl Gpu {
             Arc::new(buffer)
         })
     }
+}
 
-    /// Texture et ses mipmaps, réduites deux par deux sur le CPU.
-    fn upload(&self, image: &RgbaImage) -> wgpu::TextureView {
-        let levels = MIP_LEVELS.min(32 - image.width.max(image.height).leading_zeros());
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("morceau"),
-            size: wgpu::Extent3d { width: image.width, height: image.height, depth_or_array_layers: 1 },
-            mip_level_count: levels,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: COLOR_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let mut level = image.clone();
-        for mip_level in 0..levels {
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
-                    mip_level,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &level.pixels,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(level.width * 4),
-                    rows_per_image: Some(level.height),
-                },
-                wgpu::Extent3d { width: level.width, height: level.height, depth_or_array_layers: 1 },
-            );
-            level = level.half();
-        }
-        texture.create_view(&Default::default())
+/// Texture et ses mipmaps (`max_levels` niveaux au plus), réduites deux par deux sur le CPU.
+pub(crate) fn upload(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    image: &RgbaImage,
+    max_levels: u32,
+) -> wgpu::TextureView {
+    let levels = max_levels.min(32 - image.width.max(image.height).leading_zeros());
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("morceau"),
+        size: wgpu::Extent3d { width: image.width, height: image.height, depth_or_array_layers: 1 },
+        mip_level_count: levels,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: COLOR_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let mut level = image.clone();
+    for mip_level in 0..levels {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &level.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(level.width * 4),
+                rows_per_image: Some(level.height),
+            },
+            wgpu::Extent3d { width: level.width, height: level.height, depth_or_array_layers: 1 },
+        );
+        level = level.half();
     }
+    texture.create_view(&Default::default())
 }
 
 impl Readback {
@@ -684,14 +695,14 @@ fn padded_row(width: u32) -> u32 {
 
 /// Pixels RGBA prémultipliés, ligne par ligne.
 #[derive(Clone)]
-struct RgbaImage {
-    width: u32,
-    height: u32,
-    pixels: Vec<u8>,
+pub(crate) struct RgbaImage {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) pixels: Vec<u8>,
 }
 
 impl RgbaImage {
-    fn of(image: &Image) -> Self {
+    pub(crate) fn of(image: &Image) -> Self {
         let (width, height) = (image.width() as u32, image.height() as u32);
         let info = ImageInfo::new((width as i32, height as i32), ColorType::RGBA8888, AlphaType::Premul, None);
         let mut pixels = vec![0u8; (width * height * 4) as usize];
@@ -741,11 +752,6 @@ mod tests {
         };
         let camera = Camera { pitch: 70.0, bearing: 0.0, ..Camera::flat([6.0, 45.0], 12.0) };
         let perspective = Perspective::new(camera, width, height, 0.0, 1.0);
-        let red = {
-            let mut surface = surfaces::raster_n32_premul((64, 64)).unwrap();
-            surface.canvas().clear(Color::RED);
-            surface.image_snapshot()
-        };
         let flat: Arc<Vec<Vertex>> = Arc::new(
             (0..=GRID)
                 .flat_map(|j| (0..=GRID).map(move |i| [i as f32 / GRID as f32, j as f32 / GRID as f32, 0.0]))
@@ -753,7 +759,15 @@ mod tests {
                 .collect(),
         );
         let mesh = || flat.clone();
-        let image = || red.clone();
+        // Un morceau rouge uni : le fond seul, composé par le GPU.
+        let image = || ChunkLayers {
+            background: [1.0, 0.0, 0.0, 1.0],
+            adjust: [0.0; 20],
+            tiles: Vec::new(),
+            hillshade: None,
+            tint: [0.0; 4],
+            borders: None,
+        };
         let none = || None;
         let to_f32 = |m: glam::DMat4| m.to_cols_array_2d().map(|c| c.map(|v| v as f32));
         let settings = FrameSettings {

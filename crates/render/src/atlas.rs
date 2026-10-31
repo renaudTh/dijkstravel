@@ -47,9 +47,39 @@ pub struct Atlas {
     elevation: Arc<Elevation>,
     borders: Option<Borders>,
     adjust: ColorFilter,
+    /// La matrice de `adjust`, pour la composition sur le GPU.
+    adjust_matrix: [f32; 20],
     tint: Color,
     background: Color,
     chunks: Lru<ChunkKey, Image>,
+}
+
+/// Les calques d'un morceau, dans l'ordre de `render_chunk`, à composer sur le GPU : le CPU ne fait que
+/// décoder les tuiles, calculer l'ombrage et tracer les frontières.
+pub struct ChunkLayers<'a> {
+    /// Couleurs prémultipliées, de 0 à 1.
+    pub background: [f32; 4],
+    /// Retouche de l'imagerie : matrice de couleur par lignes de 5, translation de 0 à 1, appliquée aux
+    /// couleurs non prémultipliées comme le filtre de Skia.
+    pub adjust: [f32; 20],
+    /// Tuiles de la mer puis de l'imagerie principale.
+    pub tiles: Vec<LayerTile<'a>>,
+    /// Ombrage calculé sur sa grille (un pixel pour `step × step` pixels du morceau), et la zone du morceau
+    /// qu'elle couvre, à agrandir en bilinéaire.
+    pub hillshade: Option<(Image, [f32; 2])>,
+    pub tint: [f32; 4],
+    /// Frontières sur fond transparent, à la taille du morceau ; aucune si elles ne le traversent pas.
+    pub borders: Option<Image>,
+}
+
+/// Une tuile d'imagerie posée dans un morceau.
+pub struct LayerTile<'a> {
+    /// Identifie la tuile décodée, d'un morceau à l'autre.
+    pub key: u64,
+    /// Gauche, haut, largeur, hauteur en pixels du morceau.
+    pub rect: [f32; 4],
+    /// La tuile décodée, lue seulement si le GPU ne l'a pas déjà ; aucune hors couverture.
+    pub image: Box<dyn Fn() -> Option<Image> + 'a>,
 }
 
 /// Un morceau à dessiner : où le prendre dans l'atlas, où le poser à l'écran.
@@ -63,6 +93,7 @@ impl Atlas {
         let basemap = &input.theme.basemap;
         let (dir, terrain, vector) = (&input.tile_dir, &input.terrain, &input.vector);
         let elevation = Arc::new(Elevation::new(dir, &terrain.name, terrain.maxzoom));
+        let adjust_matrix = raster_adjust(basemap.saturation, basemap.contrast, basemap.brightness);
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Atlas {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -88,7 +119,8 @@ impl Atlas {
             borders: basemap
                 .borders
                 .then(|| Borders::new(dir, &vector.name, vector.maxzoom, parse_color(&basemap.border_color))),
-            adjust: raster_adjust(basemap.saturation, basemap.contrast, basemap.brightness),
+            adjust: color_filters::matrix_row_major(&adjust_matrix, None),
+            adjust_matrix,
             tint: parse_color(&basemap.tint_color).with_a((basemap.tint_opacity.clamp(0.0, 1.0) * 255.0).round() as u8),
             background: parse_color(&basemap.background_color),
             chunks: Lru::new(CHUNKS),
@@ -253,6 +285,51 @@ impl Atlas {
         self.chunks.get_or_insert_with(&key, || self.render_chunk(key))
     }
 
+    /// Les calques de `render_chunk`, pour le GPU.
+    pub fn layers(&self, key: ChunkKey) -> ChunkLayers<'_> {
+        let side = CHUNK + 2 * APRON;
+        let zoom = self.level_zoom(key.level);
+        let [x0, y0, ..] = Self::bounds(key);
+        let mut tiles = Vec::new();
+        for (index, store) in self.sea_imagery.iter().chain([&self.imagery]).enumerate() {
+            let tile_size = world_size(zoom) / f64::from(1u32 << self.tile_zoom_of(store, key.level));
+            for tile in self.tiles_from(store, key) {
+                let left = f64::from(tile.x) * tile_size - x0;
+                let top = f64::from(tile.y) * tile_size - y0;
+                tiles.push(LayerTile {
+                    key: hash((self.id, index, tile)),
+                    rect: [left as f32, top as f32, tile_size as f32, tile_size as f32],
+                    image: Box::new(move || store.get(tile)),
+                });
+            }
+        }
+        let hillshade = self
+            .hillshade
+            .enabled()
+            .then(|| self.hillshade.grid(zoom, [x0, y0], side as usize, side as usize))
+            .flatten()
+            .map(|(grid, step)| {
+                let covered = |count: i32| (count as usize * step) as f32;
+                let covers = [covered(grid.width()), covered(grid.height())];
+                (grid, covers)
+            });
+        let borders = self.borders.as_ref().and_then(|borders| {
+            let mut surface = surfaces::raster_n32_premul((side, side)).expect("surface des frontières");
+            borders.draw(surface.canvas(), zoom, [x0, y0], f64::from(side), f64::from(side));
+            let image = surface.image_snapshot();
+            let drawn = image.peek_pixels()?.bytes()?.iter().any(|&byte| byte != 0);
+            drawn.then_some(image)
+        });
+        ChunkLayers {
+            background: premultiplied(self.background),
+            adjust: self.adjust_matrix,
+            tiles,
+            hillshade,
+            tint: premultiplied(self.tint),
+            borders,
+        }
+    }
+
     /// Ordre des couches de `page.ts` : imagerie retouchée, ombrage, voile, frontières.
     fn render_chunk(&self, key: ChunkKey) -> Image {
         let side = CHUNK + 2 * APRON;
@@ -294,7 +371,7 @@ impl Atlas {
 
 /// Retouches `raster-saturation`, `raster-contrast` et `raster-brightness-min` du shader raster de
 /// MapLibre : toutes affines par canal, donc une seule matrice de couleur.
-fn raster_adjust(saturation: f64, contrast: f64, brightness_min: f64) -> ColorFilter {
+fn raster_adjust(saturation: f64, contrast: f64, brightness_min: f64) -> [f32; 20] {
     let saturation_factor = if saturation > 0.0 { 1.0 - 1.0 / (1.001 - saturation) } else { -saturation };
     let contrast_factor = if contrast > 0.0 { 1.0 / (1.0 - contrast) } else { 1.0 + contrast };
     // rgb + (moyenne - rgb) × s, puis (c - 0,5) × k + 0,5, puis min + (1 - min) × c.
@@ -309,5 +386,19 @@ fn raster_adjust(saturation: f64, contrast: f64, brightness_min: f64) -> ColorFi
         cross, cross, diagonal, 0.0, offset,
         0.0, 0.0, 0.0, 1.0, 0.0,
     ];
-    color_filters::matrix_row_major(&matrix, None)
+    matrix
+}
+
+/// RGBA prémultiplié de 0 à 1.
+fn premultiplied(color: Color) -> [f32; 4] {
+    let alpha = f32::from(color.a()) / 255.0;
+    let [red, green, blue] = [color.r(), color.g(), color.b()].map(|channel| f32::from(channel) / 255.0 * alpha);
+    [red, green, blue, alpha]
+}
+
+fn hash(value: impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }

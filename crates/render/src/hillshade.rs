@@ -124,6 +124,24 @@ impl Hillshade {
     /// Ombrage d'une zone `width × height` dont le coin est le pixel monde `origin` (zoom `level_zoom`),
     /// en pixels RGBA prémultipliés, à poser par-dessus l'imagerie.
     pub fn render(&self, level_zoom: f64, origin: [f64; 2], width: usize, height: usize) -> Option<Image> {
+        let (grid, step) = self.grid(level_zoom, origin, width, height)?;
+        if step == 1 {
+            return Some(grid);
+        }
+        // Agrandie en bilinéaire : chaque pixel de la grille couvre `step × step` pixels, centrés.
+        let mut surface = skia_safe::surfaces::raster_n32_premul((width as i32, height as i32))?;
+        let dest =
+            skia_safe::Rect::from_wh((grid.width() as usize * step) as f32, (grid.height() as usize * step) as f32);
+        let sampling = skia_safe::SamplingOptions::new(skia_safe::FilterMode::Linear, skia_safe::MipmapMode::None);
+        let mut paint = skia_safe::Paint::default();
+        paint.set_blend_mode(skia_safe::BlendMode::Src);
+        surface.canvas().draw_image_rect_with_sampling_options(&grid, None, dest, sampling, &paint);
+        Some(surface.image_snapshot())
+    }
+
+    /// L'ombrage de `render` sur sa grille, et son pas : un pixel de la grille pour `step × step` pixels de
+    /// la zone (1 tant que le relief n'est pas agrandi), à agrandir en bilinéaire.
+    pub fn grid(&self, level_zoom: f64, origin: [f64; 2], width: usize, height: usize) -> Option<(Image, usize)> {
         let z = self.tile_zoom(level_zoom);
         let tiles_at_zoom = f64::from(1u32 << z);
         // Pixels de tuile de relief par pixel monde.
@@ -170,17 +188,7 @@ impl Hillshade {
         });
         let info = ImageInfo::new((columns as i32, rows as i32), ColorType::RGBA8888, AlphaType::Premul, None);
         let grid = skia_safe::images::raster_from_data(&info, Data::new_copy(&pixels), columns * 4)?;
-        if step == 1 {
-            return Some(grid);
-        }
-        // Agrandie en bilinéaire : chaque pixel de la grille couvre `step × step` pixels, centrés.
-        let mut surface = skia_safe::surfaces::raster_n32_premul((width as i32, height as i32))?;
-        let dest = skia_safe::Rect::from_wh((columns * step) as f32, (rows * step) as f32);
-        let sampling = skia_safe::SamplingOptions::new(skia_safe::FilterMode::Linear, skia_safe::MipmapMode::None);
-        let mut paint = skia_safe::Paint::default();
-        paint.set_blend_mode(skia_safe::BlendMode::Src);
-        surface.canvas().draw_image_rect_with_sampling_options(&grid, None, dest, sampling, &paint);
-        Some(surface.image_snapshot())
+        Some((grid, step))
     }
 }
 

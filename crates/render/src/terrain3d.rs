@@ -130,9 +130,9 @@ impl Terrain3d {
             uv_scale: (f64::from(CHUNK) / side) as f32,
         };
         let meshes: Vec<_> = chunks.iter().map(|&key| move || self.meshes.mesh(key)).collect();
-        let images: Vec<_> = chunks.iter().map(|&key| move || atlas.chunk(key)).collect();
+        let images: Vec<_> = chunks.iter().map(|&key| move || atlas.layers(key)).collect();
         let transfer_images: Vec<_> =
-            chunks.iter().map(|&key| move || transfer.map(|(transfer, _)| transfer.chunk(key))).collect();
+            chunks.iter().map(|&key| move || transfer.map(|(transfer, _)| transfer.layers(key))).collect();
         let draws: Vec<ChunkDraw> = chunks
             .iter()
             .enumerate()
