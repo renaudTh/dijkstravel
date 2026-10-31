@@ -1,6 +1,8 @@
 //! Altitudes des tuiles de relief Terrarium, décodées une fois : l'ombrage du fond (`hillshade`) et le
-//! relief de la vue inclinée (`mesh`, la caméra, le tracé posé au sol) lisent les mêmes.
+//! relief de la vue inclinée (`mesh`, la caméra, le tracé posé au sol) lisent les mêmes. Une source peut
+//! en avoir une autre qui la comble (l'IGN, Terrarium) : hors de ses zones et dans ses trous.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -8,7 +10,8 @@ use skia_safe::{AlphaType, ColorType, Data, Image, ImageInfo};
 
 use crate::cache::Lru;
 use crate::geo::LonLat;
-use crate::mercator::{project, world_size};
+use crate::mercator::{project, unproject, world_size};
+use crate::model::TileSource;
 use crate::tiles::TileKey;
 
 /// Côté d'une tuile Terrarium, en pixels.
@@ -23,6 +26,10 @@ pub struct Elevation {
     pub name: String,
     pub maxzoom: u8,
     dir: PathBuf,
+    /// Zones couvertes, `[ouest, sud, est, nord]` en degrés ; vide : le monde entier.
+    bounds: Vec<[f64; 4]>,
+    /// Ce qui comble cette source hors de ses zones, là où une tuile manque, et dans ses trous.
+    fallback: Option<Arc<Elevation>>,
     tiles: Lru<TileKey, Option<Arc<Vec<f32>>>>,
 }
 
@@ -32,16 +39,46 @@ impl Elevation {
             name: name.to_owned(),
             maxzoom,
             dir: PathBuf::from(cache_dir).join(name),
+            bounds: Vec::new(),
+            fallback: None,
             tiles: Lru::new(DECODED_TILES),
         }
     }
 
-    /// Altitudes de la tuile en mètres, ligne par ligne ; `None` si elle manque au cache. Ses trous
-    /// prennent l'altitude de la tuile parente (`parent_tiles`), à défaut 0.
+    /// La source, et celle qui la comble, de proche en proche.
+    pub fn of(cache_dir: &str, source: &TileSource) -> Self {
+        Elevation {
+            bounds: source.bounds.clone(),
+            fallback: source.fallback.as_ref().map(|fallback| Arc::new(Elevation::of(cache_dir, fallback))),
+            ..Elevation::new(cache_dir, &source.name, source.maxzoom)
+        }
+    }
+
+    /// La tuile touche une zone de la source.
+    fn covers(&self, key: TileKey) -> bool {
+        if self.bounds.is_empty() {
+            return true;
+        }
+        let corner = |x: u32, y: u32| unproject([f64::from(x) * 512.0, f64::from(y) * 512.0], f64::from(key.z));
+        let ([west, north], [east, south]) = (corner(key.x, key.y), corner(key.x + 1, key.y + 1));
+        self.bounds.iter().any(|&[w, s, e, n]| west < e && east > w && south < n && north > s)
+    }
+
+    /// Altitudes de la tuile en mètres, ligne par ligne ; `None` si elle manque au cache et qu'aucune source
+    /// ne la comble. Ses trous prennent l'altitude de la source qui comble, sinon de la tuile parente
+    /// (`tile_names`), à défaut 0.
     pub fn tile(&self, key: TileKey) -> Option<Arc<Vec<f32>>> {
         self.tiles.get_or_insert_with(&key, || {
             let file = self.dir.join(key.z.to_string()).join(key.x.to_string()).join(key.y.to_string());
-            let image = Image::from_encoded(Data::new_copy(&std::fs::read(file).ok()?))?;
+            let bytes = self.covers(key).then(|| std::fs::read(file).ok()).flatten();
+            let Some(bytes) = bytes else {
+                // Hors des zones, ou tuile absente : toute de la source qui comble.
+                self.fallback.as_ref()?;
+                let mut voids = vec![f32::MIN; DIM * DIM];
+                self.fill_voids(key, &mut voids);
+                return Some(Arc::new(voids));
+            };
+            let image = Image::from_encoded(Data::new_copy(&bytes))?;
             let info = ImageInfo::new((DIM as i32, DIM as i32), ColorType::RGBA8888, AlphaType::Unpremul, None);
             let mut pixels = vec![0u8; DIM * DIM * 4];
             if image.width() as usize != DIM
@@ -63,9 +100,22 @@ impl Elevation {
         })
     }
 
-    /// Bouche les trous de la tuile `key` par la tuile parente, bilinéaire, elle-même bouchée de proche
-    /// en proche ; sans parente en cache, au niveau 0.
+    /// Bouche les trous de la tuile `key` par la source qui comble, au zoom le plus proche qu'elle ait,
+    /// sinon par la tuile parente, bilinéaire, elle-même bouchée de proche en proche ; sans parente en
+    /// cache, au niveau 0.
     fn fill_voids(&self, key: TileKey, altitudes: &mut [f32]) {
+        if let Some(fallback) = &self.fallback {
+            let z = key.z.min(fallback.maxzoom);
+            let scale = f64::from(1u32 << (key.z - z));
+            let (left, top) = (f64::from(key.x) * DIM as f64, f64::from(key.y) * DIM as f64);
+            for (i, altitude) in altitudes.iter_mut().enumerate().filter(|(_, altitude)| **altitude < VOID_BELOW) {
+                let (x, y) = ((i % DIM) as f64, (i / DIM) as f64);
+                // Centre du pixel (x + 0,5) au zoom de la source qui comble, ramené aux centres entiers.
+                let (px, py) = ((left + x + 0.5) / scale - 0.5, (top + y + 0.5) / scale - 0.5);
+                *altitude = fallback.altitude_at_pixel(z, px, py) as f32;
+            }
+            return;
+        }
         let parent = (key.z > 0).then(|| TileKey { z: key.z - 1, x: key.x / 2, y: key.y / 2 });
         let (left, top) = (f64::from(key.x % 2) * DIM as f64 / 2.0, f64::from(key.y % 2) * DIM as f64 / 2.0);
         for (i, altitude) in altitudes.iter_mut().enumerate().filter(|(_, altitude)| **altitude < VOID_BELOW) {
@@ -88,6 +138,34 @@ impl Elevation {
     /// Les tuiles parentes de `tiles`, qui bouchent leurs trous.
     pub fn parent_tiles(tiles: &[TileKey]) -> Vec<TileKey> {
         tiles.iter().filter(|t| t.z > 0).map(|t| TileKey { z: t.z - 1, x: t.x / 2, y: t.y / 2 }).collect()
+    }
+
+    /// Les fichiers à lire pour les tuiles `tiles`, `<source>/<z>/<x>/<y>` : celles des zones de la source,
+    /// et ce qui comble leurs trous, la source qui comble (tuiles voisines comprises, que l'interpolation
+    /// lit au bord) ou à défaut les tuiles parentes.
+    pub fn tile_names(&self, tiles: &[TileKey]) -> BTreeSet<String> {
+        let name = |source: &str, t: &TileKey| format!("{source}/{}/{}/{}", t.z, t.x, t.y);
+        let mut names: BTreeSet<String> =
+            tiles.iter().filter(|t| self.covers(**t)).map(|t| name(&self.name, t)).collect();
+        match &self.fallback {
+            Some(fallback) => {
+                let mut below = BTreeSet::new();
+                for t in tiles {
+                    let z = t.z.min(fallback.maxzoom);
+                    let (x, y) = (i64::from(t.x >> (t.z - z)), i64::from(t.y >> (t.z - z)));
+                    let count = 1i64 << z;
+                    for (dx, dy) in [-1, 0, 1].into_iter().flat_map(|dx| [-1, 0, 1].map(|dy| (dx, dy))) {
+                        let y = y + dy;
+                        if (0..count).contains(&y) {
+                            below.insert(TileKey { z, x: (x + dx).rem_euclid(count) as u32, y: y as u32 });
+                        }
+                    }
+                }
+                names.extend(fallback.tile_names(&below.into_iter().collect::<Vec<_>>()));
+            }
+            None => names.extend(Self::parent_tiles(tiles).iter().map(|t| name(&self.name, t))),
+        }
+        names
     }
 
     /// Tuiles au zoom `z` qui couvrent `[x0, x1[ × [y0, y1[` (pixels monde au zoom `level_zoom`), plus
@@ -201,6 +279,39 @@ mod tests {
         // Sans parente en cache, au niveau de la mer comme une tuile absente.
         let orphan = elevation.tile(TileKey { z: 13, x: 4300, y: 2899 }).unwrap();
         assert!(orphan.iter().all(|&altitude| altitude == 0.0));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// L'IGN au zoom 14 en métropole, comblé par Terrarium au zoom 13.
+    fn ign_over_terrarium(dir: &std::path::Path) -> Elevation {
+        let terrarium = TileSource { name: "terrarium".into(), maxzoom: 13, bounds: Vec::new(), fallback: None };
+        let ign = TileSource {
+            name: "ign-alti".into(),
+            maxzoom: 14,
+            bounds: vec![[-5.5, 41.2, 9.8, 51.2]],
+            fallback: Some(Box::new(terrarium)),
+        };
+        Elevation::of(dir.to_str().unwrap(), &ign)
+    }
+
+    #[test]
+    fn the_ign_is_read_in_france_and_terrarium_fills_the_rest() {
+        let dir = std::env::temp_dir().join(format!("dijkstravel-ign-{}", std::process::id()));
+        // Belledonne (6,0° E, 45,2° N) dans le cadre de la métropole, le Portugal (9,0° O) hors de lui.
+        let alps = TileKey { z: 14, x: 8465, y: 5873 };
+        write_tile(&dir.join("ign-alti"), alps, -32768.0);
+        write_tile(&dir.join("terrarium"), TileKey { z: 13, x: 4232, y: 2936 }, 1800.0);
+        let elevation = ign_over_terrarium(&dir);
+        let names = elevation.tile_names(&[alps]);
+        assert!(names.contains("ign-alti/14/8465/5873"));
+        assert!(names.contains("terrarium/13/4232/2936") && names.contains("terrarium/13/4233/2937"), "{names:?}");
+        let portugal = TileKey { z: 14, x: 7783, y: 6193 };
+        assert!(!elevation.tile_names(&[portugal]).iter().any(|name| name.starts_with("ign-alti")));
+        // Trou de l'IGN : l'altitude de Terrarium.
+        let filled = elevation.tile(alps).unwrap();
+        assert!(filled[DIM * 10 + 10] > 1799.0 && filled[DIM * 10 + 10] < 1801.0, "{}", filled[DIM * 10 + 10]);
+        // Hors zone, sans fichier de l'IGN : toute de Terrarium, au niveau 0 sans tuile en cache.
+        assert!(elevation.tile(portugal).unwrap().iter().all(|&altitude| altitude == 0.0));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

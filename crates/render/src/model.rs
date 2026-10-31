@@ -19,7 +19,7 @@ pub struct Input {
     pub sea_imagery: Option<ImagerySource>,
     /// Fond des transferts entre étapes (`basemap.transferImagery`), en fondu depuis `imagery`.
     pub transfer_imagery: Option<ImagerySource>,
-    /// Relief (Terrarium) d'où vient l'ombrage.
+    /// Relief d'où viennent l'ombrage et la vue inclinée : celui de l'IGN en France, Terrarium ailleurs.
     pub terrain: TileSource,
     /// Tuiles vectorielles d'où viennent les frontières.
     pub vector: TileSource,
@@ -103,6 +103,11 @@ pub struct ImagerySource {
 pub struct TileSource {
     pub name: String,
     pub maxzoom: u8,
+    /// Zones couvertes, `[ouest, sud, est, nord]` en degrés : aucune tuile n'est demandée hors d'elles.
+    /// Vide : le monde entier.
+    pub bounds: Vec<[f64; 4]>,
+    /// Relief : la source qui comble ce que celle-ci n'a pas, hors de ses zones et dans ses trous.
+    pub fallback: Option<Box<TileSource>>,
 }
 
 /// Petit côté de l'écran de référence, en pixels : le cadrage et les tailles du thème y sont réglés, et

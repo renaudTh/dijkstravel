@@ -122,10 +122,7 @@ impl Meshes {
         let margin = world_size(level_zoom) / ((DIM as f64) * f64::from(1u32 << self.tile_zoom(key.level)));
         let cell = chunk / GRID as f64;
         let bounds = [x0 - cell, y0 - cell, x0 + chunk + cell + margin, y0 + chunk + cell + margin];
-        let name = &self.elevation.name;
-        let tiles = self.elevation.tiles_covering(self.tile_zoom(key.level), level_zoom, bounds, 0);
-        let parents = Elevation::parent_tiles(&tiles);
-        tiles.into_iter().chain(parents).map(|t| format!("{name}/{}/{}/{}", t.z, t.x, t.y)).collect()
+        self.elevation.tile_names(&self.elevation.tiles_covering(self.tile_zoom(key.level), level_zoom, bounds, 0))
     }
 }
 

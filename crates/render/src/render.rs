@@ -317,11 +317,8 @@ impl Renderer {
         }
         let elevation = self.atlas.elevation();
         let zoom = PROFILE_ZOOM.min(elevation.maxzoom);
-        self.profile_points()
-            .iter()
-            .flat_map(|&point| elevation.tiles_at(point, zoom))
-            .map(|t| format!("{}/{}/{}/{}", elevation.name, t.z, t.x, t.y))
-            .collect()
+        let tiles: Vec<_> = self.profile_points().iter().flat_map(|&point| elevation.tiles_at(point, zoom)).collect();
+        elevation.tile_names(&tiles)
     }
 }
 

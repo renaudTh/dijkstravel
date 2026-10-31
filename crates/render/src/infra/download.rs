@@ -66,10 +66,26 @@ const IMAGERIES: [Imagery; 3] = [
     },
 ];
 
-/// Relief (Mapzen Terrain Tiles, encodage Terrarium), d'où viennent l'ombrage du fond (zoom 12 au plus)
-/// et le relief de la vue inclinée.
+/// Relief mondial (Mapzen Terrain Tiles, encodage Terrarium), d'environ 30 m à la source en montagne :
+/// partout où l'IGN n'a rien.
 const TERRAIN: (&str, &str, u8) =
     ("terrarium", "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png", 14);
+/// Relief de l'IGN (RGE ALTI, 1 à 5 m, licence ouverte Etalab 2.0), France et outre-mer : servi en WMS
+/// à la taille et dans la projection de nos tuiles, en altitudes flottantes, -99999 hors couverture. Il
+/// est rangé au cache en Terrarium, ses trous en vides que Terrarium comble.
+const IGN_TERRAIN: (&str, u8) = ("ign-alti", 15);
+const IGN_TERRAIN_WMS: &str = "https://data.geopf.fr/wms-r/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256&FORMAT=image/x-bil;bits=32&BBOX=";
+/// La métropole et la Corse, puis la Guadeloupe, la Martinique, la Guyane, La Réunion, Mayotte et
+/// Saint-Pierre-et-Miquelon, larges : `[ouest, sud, est, nord]`.
+const IGN_TERRAIN_BOUNDS: [[f64; 4]; 7] = [
+    [-5.5, 41.2, 9.8, 51.2],
+    [-61.9, 15.8, -60.9, 16.6],
+    [-61.3, 14.3, -60.7, 14.9],
+    [-54.7, 2.0, -51.5, 5.9],
+    [55.1, -21.5, 55.9, -20.8],
+    [44.9, -13.1, 45.4, -12.5],
+    [-56.5, 46.7, -56.1, 47.2],
+];
 /// Tuiles vectorielles OpenFreeMap (schéma OpenMapTiles), dont seules les frontières sont tirées. Leur
 /// adresse change à chaque mise à jour de la carte : elle se lit dans le TileJSON.
 const VECTOR: (&str, &str, u8) = ("openmaptiles", "https://tiles.openfreemap.org/planet", 14);
@@ -80,12 +96,19 @@ pub fn imagery_source(name: &str) -> ImagerySource {
     ImagerySource { name: imagery.name.to_owned(), maxzoom: imagery.maxzoom, credit: imagery.credit.to_owned() }
 }
 
+/// Le relief de l'IGN, comblé par Terrarium.
 pub fn terrain_source() -> TileSource {
-    TileSource { name: TERRAIN.0.to_owned(), maxzoom: TERRAIN.2 }
+    let terrarium = TileSource { name: TERRAIN.0.to_owned(), maxzoom: TERRAIN.2, bounds: Vec::new(), fallback: None };
+    TileSource {
+        name: IGN_TERRAIN.0.to_owned(),
+        maxzoom: IGN_TERRAIN.1,
+        bounds: IGN_TERRAIN_BOUNDS.to_vec(),
+        fallback: Some(Box::new(terrarium)),
+    }
 }
 
 pub fn vector_source() -> TileSource {
-    TileSource { name: VECTOR.0.to_owned(), maxzoom: VECTOR.2 }
+    TileSource { name: VECTOR.0.to_owned(), maxzoom: VECTOR.2, bounds: Vec::new(), fallback: None }
 }
 
 /// Images des lieux dans le cache.
@@ -244,6 +267,15 @@ impl Downloader {
     fn fetch_tile(&self, tile: &str, dir: &Path) -> Result<Result<(), String>, String> {
         let parts: Vec<&str> = tile.split('/').collect();
         let [source, z, x, y] = parts.as_slice() else { return Err(format!("Tuile mal formée : {tile}")) };
+        if *source == IGN_TERRAIN.0 {
+            let parse = |value: &str| value.parse::<u32>().map_err(|_| format!("Tuile mal formée : {tile}"));
+            let url = format!("{IGN_TERRAIN_WMS}{}", mercator_bbox(parse(z)?, parse(x)?, parse(y)?));
+            return match self.get_with_retries(&url, false) {
+                Ok(Some(body)) => write_atomically(&dir.join(tile), &terrarium_png(&body)?).map(Ok),
+                Ok(None) => Ok(Ok(())),
+                Err(reason) => Ok(Err(reason)),
+            };
+        }
         let url = self.template(source)?.replace("{z}", z).replace("{x}", x).replace("{y}", y);
         match self.get_with_retries(&url, WORLDWIDE_IMAGERIES.contains(source)) {
             Ok(Some(body)) => write_atomically(&dir.join(tile), &body).map(Ok),
@@ -332,6 +364,47 @@ impl Downloader {
 
 /// Écrite à côté puis renommée : un rendu concurrent ne lit jamais un fichier à moitié écrit. Le nom
 /// provisoire porte le processus et un compteur : deux rendus d'un même serveur ne s'y croisent pas.
+/// `ouest,sud,est,nord` de la tuile `z/x/y`, en mètres Web Mercator (EPSG:3857).
+fn mercator_bbox(z: u32, x: u32, y: u32) -> String {
+    const HALF: f64 = 20_037_508.342_789_244;
+    let side = 2.0 * HALF / f64::from(1u32 << z);
+    let (west, north) = (-HALF + f64::from(x) * side, HALF - f64::from(y) * side);
+    format!("{west},{},{},{north}", north - side, west + side)
+}
+
+/// Altitudes BIL (256 × 256 flottants 32 bits petit-boutistes) en PNG Terrarium : (R × 256 + G + B / 256)
+/// − 32768 m, au 1/256 m près. Hors couverture (-99999), le vide de Terrarium (0, 0, 0).
+fn terrarium_png(bil: &[u8]) -> Result<Vec<u8>, String> {
+    const SIDE: usize = 256;
+    if bil.len() != SIDE * SIDE * 4 {
+        let start = String::from_utf8_lossy(&bil[..bil.len().min(200)]).into_owned();
+        return Err(format!("relief IGN : {} octets au lieu de {} ({start})", bil.len(), SIDE * SIDE * 4));
+    }
+    let mut pixels = Vec::with_capacity(SIDE * SIDE * 4);
+    for value in bil.as_chunks::<4>().0 {
+        let altitude = f64::from(f32::from_le_bytes(*value));
+        let encoded =
+            if altitude.is_finite() && altitude > -1000.0 { (altitude + 32768.0).clamp(0.0, 65535.996) } else { 0.0 };
+        let whole = encoded.floor();
+        pixels.extend_from_slice(&[
+            (whole / 256.0) as u8,
+            (whole % 256.0) as u8,
+            ((encoded - whole) * 256.0) as u8,
+            255,
+        ]);
+    }
+    let info = skia_safe::ImageInfo::new(
+        (SIDE as i32, SIDE as i32),
+        skia_safe::ColorType::RGBA8888,
+        skia_safe::AlphaType::Unpremul,
+        None,
+    );
+    let image = skia_safe::images::raster_from_data(&info, skia_safe::Data::new_copy(&pixels), SIDE * 4)
+        .ok_or("relief IGN : image impossible")?;
+    let png = image.encode(None, skia_safe::EncodedImageFormat::PNG, 100).ok_or("relief IGN : PNG impossible")?;
+    Ok(png.as_bytes().to_vec())
+}
+
 fn write_atomically(file: &Path, body: &[u8]) -> Result<(), String> {
     static PARTS: AtomicUsize = AtomicUsize::new(0);
     if let Some(dir) = file.parent() {
@@ -346,6 +419,34 @@ fn write_atomically(file: &Path, body: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asks_the_ign_for_our_tile_in_web_mercator() {
+        assert_eq!(
+            mercator_bbox(0, 0, 0),
+            "-20037508.342789244,-20037508.342789244,20037508.342789244,20037508.342789244"
+        );
+        assert_eq!(mercator_bbox(1, 1, 0), "0,0,20037508.342789244,20037508.342789244");
+    }
+
+    #[test]
+    fn stores_ign_altitudes_as_terrarium_with_voids_outside_coverage() {
+        let mut bil = Vec::new();
+        for i in 0..256 * 256 {
+            let altitude: f32 = if i == 0 { -99999.0 } else { 2454.5 };
+            bil.extend_from_slice(&altitude.to_le_bytes());
+        }
+        let png = terrarium_png(&bil).unwrap();
+        let image = skia_safe::Image::from_encoded(skia_safe::Data::new_copy(&png)).unwrap();
+        let info =
+            skia_safe::ImageInfo::new((256, 256), skia_safe::ColorType::RGBA8888, skia_safe::AlphaType::Unpremul, None);
+        let mut pixels = vec![0u8; 256 * 256 * 4];
+        assert!(image.read_pixels(&info, &mut pixels, 256 * 4, (0, 0), skia_safe::image::CachingHint::Disallow));
+        let altitude = |p: &[u8]| f64::from(p[0]) * 256.0 + f64::from(p[1]) + f64::from(p[2]) / 256.0 - 32768.0;
+        assert_eq!(altitude(&pixels[0..4]), -32768.0, "vide de Terrarium");
+        assert_eq!(altitude(&pixels[4..8]), 2454.5);
+        assert!(terrarium_png(b"<ExceptionReport/>").is_err());
+    }
 
     #[test]
     fn names_cached_images_like_before() {

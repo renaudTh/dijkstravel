@@ -99,7 +99,7 @@ impl Atlas {
     pub fn new(travel_zoom: f64, input: &Input) -> Self {
         let basemap = &input.theme.basemap;
         let (dir, terrain, vector) = (&input.tile_dir, &input.terrain, &input.vector);
-        let elevation = Arc::new(Elevation::new(dir, &terrain.name, terrain.maxzoom));
+        let elevation = Arc::new(Elevation::of(dir, terrain));
         let adjust_matrix = raster_adjust(basemap.saturation, basemap.contrast, basemap.brightness);
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Atlas {
@@ -280,7 +280,7 @@ impl Atlas {
             tiles.extend(self.tiles_from(sea, key).into_iter().map(|t| name(&sea.name, t)));
         }
         if self.hillshade.enabled() {
-            tiles.extend(self.hillshade.tiles_for(zoom, x0, y0, x1, y1).into_iter().map(|t| name("terrarium", t)));
+            tiles.extend(self.elevation.tile_names(&self.hillshade.tiles_for(zoom, x0, y0, x1, y1)));
         }
         if let Some(borders) = &self.borders {
             tiles.extend(borders.tiles_for(zoom, x0, y0, x1, y1).into_iter().map(|t| name("openmaptiles", t)));

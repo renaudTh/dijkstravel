@@ -113,7 +113,7 @@ pub fn tiles(animation: &Animation, elevation: &Elevation, size: [u32; 2], exagg
             }
         }
     }
-    tiles.into_iter().map(|t| format!("{}/{}/{}/{}", elevation.name, t.z, t.x, t.y)).collect()
+    elevation.tile_names(&tiles.into_iter().collect::<Vec<_>>()).into_iter().collect()
 }
 
 /// Ni la visée vers la tête ni celle du bas de l'écran ne passent sous le relief.
