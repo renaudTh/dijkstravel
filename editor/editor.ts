@@ -91,6 +91,7 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'text', path: 'stops.endColor', label: "Couleur de l'arrivée (#rrggbb, vide : aucune)" },
       { kind: 'color', path: 'stops.sprintColor', label: 'Sprints intermédiaires' },
       { kind: 'color', path: 'stops.climbColor', label: 'Ascensions classées' },
+      { kind: 'color', path: 'stops.supplyColor', label: 'Ravitaillements' },
       { kind: 'range', path: 'stops.visitedRatio', label: 'Rayon des lieux atteints', step: 0.05 },
       { kind: 'range', path: 'stops.popRadius', label: 'Ampleur du « pop »', step: 1 },
       { kind: 'text', path: 'stops.icon', label: 'Emoji sur les lieux atteints (🏟️, 🍺…)' },

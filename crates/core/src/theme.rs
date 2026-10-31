@@ -54,9 +54,10 @@ pub struct StopsTheme {
     pub start_color: String,
     /// De même pour le dernier lieu (arrivée).
     pub end_color: String,
-    /// Repères d'une étape (`Tour::markers`) : sprints intermédiaires et ascensions classées.
+    /// Repères d'une étape (`Tour::markers`) : sprints intermédiaires, ascensions classées, ravitaillements.
     pub sprint_color: String,
     pub climb_color: String,
+    pub supply_color: String,
     /// Rayon d'un lieu atteint, rapporté à la largeur du trait.
     pub visited_ratio: f64,
     /// Rayon ajouté au moment où le lieu est atteint (« pop »).
@@ -225,6 +226,7 @@ impl Default for Theme {
                 end_color: s(""),
                 sprint_color: s("#00a650"),
                 climb_color: s("#e2001a"),
+                supply_color: s("#f39c12"),
                 visited_ratio: 0.75,
                 pop_radius: 12.0,
                 icon: s(""),
@@ -379,6 +381,7 @@ impl Theme {
                 end_color: r.optional_color("stops.endColor", &d.stops.end_color),
                 sprint_color: r.color("stops.sprintColor", &d.stops.sprint_color),
                 climb_color: r.color("stops.climbColor", &d.stops.climb_color),
+                supply_color: r.color("stops.supplyColor", &d.stops.supply_color),
                 visited_ratio: r.number("stops.visitedRatio", d.stops.visited_ratio),
                 pop_radius: r.number("stops.popRadius", d.stops.pop_radius),
                 icon: r.emoji("stops.icon", &d.stops.icon),

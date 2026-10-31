@@ -37,6 +37,8 @@ pub enum MarkerKind {
     Sprint,
     /// Ascension classée (col, côte).
     Climb,
+    /// Ravitaillement d'une course à pied ; catégorie `eau` : simple point d'eau.
+    Supply,
 }
 
 /// Un point remarquable d'une étape, visible de son passage à la fin de son étape.

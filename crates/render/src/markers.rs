@@ -1,4 +1,4 @@
-//! Repères d'une étape (sprints, ascensions) : ils apparaissent au passage de la tête et s'effacent au
+//! Repères d'une étape (sprints, ascensions, ravitaillements) : ils apparaissent au passage de la tête et s'effacent au
 //! début du transfert qui suit leur étape. Seuls les lieux restent sur le tracé global.
 
 use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
@@ -26,6 +26,8 @@ struct Marker {
     color: Color,
     /// Ascension : disque blanc cerclé de sa couleur, comme le maillot à pois ; sprint : plein.
     ring: bool,
+    /// Ravitaillement : carré arrondi, pour ne pas le confondre avec un col.
+    square: bool,
     label: Option<Label>,
     /// Nom à gauche du point : choisi une fois, au passage de la tête, pour ne jamais sauter d'un côté à l'autre.
     left: bool,
@@ -64,6 +66,7 @@ impl Markers {
                 let color = match marker.kind {
                     MarkerKind::Sprint => &theme.stops.sprint_color,
                     MarkerKind::Climb => &theme.stops.climb_color,
+                    MarkerKind::Supply => &theme.stops.supply_color,
                 };
                 let label = theme.stops.show_labels.then(|| fonts.label(&label_of(marker), size, text, halo)).flatten();
                 // À droite, sauf si le nom déborderait déjà de l'écran au passage.
@@ -81,6 +84,7 @@ impl Markers {
                     fade,
                     color: parse_color(color),
                     ring: marker.kind == MarkerKind::Climb,
+                    square: marker.kind == MarkerKind::Supply,
                     label,
                     left,
                 }
@@ -120,9 +124,16 @@ impl Markers {
             let radius = (self.radius + 6.0 * pop) * ratio;
             let mut paint = Paint::default();
             paint.set_anti_alias(true).set_color(self.halo_color).set_alpha_f(0.85 * opacity);
-            canvas.draw_circle(point, radius + 3.0 * ratio, &paint);
-            paint.set_color(marker.color).set_alpha_f(opacity);
-            canvas.draw_circle(point, radius, &paint);
+            if marker.square {
+                let square = |half: f32| Rect::from_xywh(point.x - half, point.y - half, 2.0 * half, 2.0 * half);
+                canvas.draw_round_rect(square(radius + 3.0 * ratio), radius * 0.45, radius * 0.45, &paint);
+                paint.set_color(marker.color).set_alpha_f(opacity);
+                canvas.draw_round_rect(square(radius), radius * 0.35, radius * 0.35, &paint);
+            } else {
+                canvas.draw_circle(point, radius + 3.0 * ratio, &paint);
+                paint.set_color(marker.color).set_alpha_f(opacity);
+                canvas.draw_circle(point, radius, &paint);
+            }
             if marker.ring {
                 paint.set_color(Color::WHITE).set_alpha_f(opacity);
                 canvas.draw_circle(point, radius * 0.55, &paint);
@@ -158,7 +169,7 @@ fn label_offset(label: &Label, radius: f32) -> f32 {
     LABEL_OFFSET_EM * label.height + radius
 }
 
-/// « Sprint · Pouzac », « Col du Tourmalet · HC », « Côte de Billonnière · 4e cat. ».
+/// « Sprint · Pouzac », « Col du Tourmalet · HC », « Côte de Billonnière · 4e cat. », « Ravito · Super Collet ».
 fn label_of(marker: &TourMarker) -> String {
     match (marker.kind, marker.category.as_deref()) {
         (MarkerKind::Sprint, _) => format!("Sprint · {}", marker.name),
@@ -166,6 +177,8 @@ fn label_of(marker: &TourMarker) -> String {
         (MarkerKind::Climb, Some("HC")) => format!("{} · HC", marker.name),
         (MarkerKind::Climb, Some("1")) => format!("{} · 1re cat.", marker.name),
         (MarkerKind::Climb, Some(category)) => format!("{} · {category}e cat.", marker.name),
+        (MarkerKind::Supply, Some("eau")) => format!("Point d'eau · {}", marker.name),
+        (MarkerKind::Supply, _) => format!("Ravito · {}", marker.name),
     }
 }
 
@@ -190,5 +203,7 @@ mod tests {
         assert_eq!(label_of(&marker(MarkerKind::Climb, Some("HC"))), "X · HC");
         assert_eq!(label_of(&marker(MarkerKind::Climb, Some("1"))), "X · 1re cat.");
         assert_eq!(label_of(&marker(MarkerKind::Climb, Some("3"))), "X · 3e cat.");
+        assert_eq!(label_of(&marker(MarkerKind::Supply, None)), "Ravito · X");
+        assert_eq!(label_of(&marker(MarkerKind::Supply, Some("eau"))), "Point d'eau · X");
     }
 }
