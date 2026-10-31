@@ -29,7 +29,11 @@ pub struct Scene {
 
 impl Scene {
     /// Télécharge au besoin les images des lieux dans le cache de `downloader`.
-    pub fn new(run: Run, tour: Tour, places: &[Place], downloader: Downloader) -> Scene {
+    /// Les repères de la tournée ne sont gardés que si le run les montre (`video.markers`).
+    pub fn new(run: Run, mut tour: Tour, places: &[Place], downloader: Downloader) -> Scene {
+        if !run.video.markers {
+            tour.markers.clear();
+        }
         let images = downloader.place_images(places);
         let title = run.title.clone().unwrap_or_else(|| format!("{} lieux · {}", tour.stops.len(), run.name));
         Scene { run, tour: Arc::new(tour), title, images: images.files, missing_images: images.missing, downloader }

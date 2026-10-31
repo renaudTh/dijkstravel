@@ -34,7 +34,6 @@ pub struct Stops {
     unvisited_color: Color,
     /// Couleur propre de chaque lieu : départ ou arrivée d'une étape, si le thème en donne une.
     own_colors: Vec<Option<Color>>,
-    halo_color: Color,
     emoji: Option<Image>,
 }
 
@@ -85,7 +84,6 @@ impl Stops {
             core_color: parse_color(&theme.route.core_color),
             unvisited_color: parse_color(&stops_theme.unvisited_color),
             own_colors: own_colors(tour, stops_theme),
-            halo_color: halo,
             emoji: fonts.emoji(&stops_theme.icon),
         }
     }
@@ -123,19 +121,16 @@ impl Stops {
             |pop: f32| self.width as f32 * self.theme.visited_ratio as f32 + self.theme.pop_radius as f32 * pop;
         let mut paint = Paint::default();
         paint.set_anti_alias(true);
-        let mut halo = Paint::default();
-        halo.set_anti_alias(true).set_color(self.halo_color).set_alpha_f(0.85);
         for &(index, stop, point, visited, pop) in &shown {
             if self.has_emoji(stop, visited) {
                 continue;
             }
-            // Départ et arrivée colorés : rien avant d'être atteints, puis pleins et cerclés.
+            // Départ et arrivée colorés : rien avant d'être atteints, puis pleins.
             if let Some(color) = self.own_color(index) {
                 if !visited {
                     continue;
                 }
                 let radius = visited_radius(pop) * ratio;
-                canvas.draw_circle(point, radius + 3.0 * ratio, &halo);
                 paint.set_color(color);
                 canvas.draw_circle(point, radius, &paint);
                 continue;

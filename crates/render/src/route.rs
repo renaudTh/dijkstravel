@@ -2,7 +2,7 @@
 //! de l'ancien rendu MapLibre.
 
 use skia_safe::canvas::SaveLayerRec;
-use skia_safe::{BlendMode, Canvas, Color, Contains, Image, Paint, PathBuilder, Point, Rect, paint};
+use skia_safe::{BlendMode, Canvas, Color, Contains, Image, Paint, PathBuilder, PathEffect, Point, Rect, paint};
 
 use crate::color::parse_color;
 use crate::geo::{LonLat, MeasuredPath};
@@ -17,6 +17,8 @@ const SMALL_SIZE_ZOOM: f64 = 5.0;
 const SMALL_SIZE_RATIO: f64 = 0.25;
 /// Traits superposés pour reproduire le dégradé linéaire de `line-blur`.
 const BLUR_STEPS: usize = 8;
+/// Tirets du cœur d'un contre-la-montre, plein puis vide, en largeurs de trait.
+const TIME_TRIAL_DASH: [f32; 2] = [1.2, 0.8];
 
 /// Nature d'un morceau du tracé.
 #[derive(Clone, Copy, PartialEq)]
@@ -24,6 +26,7 @@ enum Kind {
     Road,
     Ferry,
     Transfer,
+    TimeTrial,
 }
 
 /// `byZoom` de `page.ts` : facteur appliqué aux tailles selon le zoom de l'image.
@@ -35,7 +38,7 @@ pub fn zoom_ratio(zoom: f64) -> f64 {
 pub struct Route {
     /// Tracé allégé pour le dessin seulement ; distances d'origine conservées.
     drawn: MeasuredPath,
-    /// Traversées et transferts, triés : `[début, fin]` en mètres et leur nature.
+    /// Traversées, transferts et contre-la-montre, triés : `[début, fin]` en mètres et leur nature.
     crossings: Vec<([f64; 2], Kind)>,
     theme: RouteTheme,
     colors: Colors,
@@ -47,6 +50,7 @@ struct Colors {
     core: Color,
     stripe: Color,
     ferry: Color,
+    time_trial: Color,
     head: Color,
 }
 
@@ -55,11 +59,13 @@ impl Route {
         path: &MeasuredPath,
         ferries: &[[f64; 2]],
         transfers: &[[f64; 2]],
+        time_trials: &[[f64; 2]],
         theme: &RouteTheme,
         head_icon: Option<Image>,
     ) -> Self {
         let mut crossings: Vec<([f64; 2], Kind)> = ferries.iter().map(|&range| (range, Kind::Ferry)).collect();
         crossings.extend(transfers.iter().map(|&range| (range, Kind::Transfer)));
+        crossings.extend(time_trials.iter().map(|&range| (range, Kind::TimeTrial)));
         crossings.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
         Route {
             drawn: path.decimate(path.total_meters() / MAX_DRAWN_POINTS),
@@ -69,6 +75,7 @@ impl Route {
                 core: parse_color(&theme.core_color),
                 stripe: parse_color(&theme.stripe_color),
                 ferry: parse_color(&theme.ferry_color),
+                time_trial: parse_color(&theme.time_trial_color),
                 head: parse_color(&theme.head_color),
             },
             theme: theme.clone(),
@@ -83,37 +90,47 @@ impl Route {
         let ratio = zoom_ratio(view.camera_zoom());
         let width = self.theme.width * ratio;
         // Les transferts entre étapes ne se dessinent pas : seule la caméra les parcourt.
-        let pieces: Vec<(Vec<Point>, bool)> = self
+        let pieces: Vec<(Vec<Point>, Kind)> = self
             .pieces(meters)
             .into_iter()
             .filter(|(_, kind)| *kind != Kind::Transfer)
-            .map(|(points, kind)| (screen_line(&points, view), kind == Kind::Ferry))
+            .map(|(points, kind)| (screen_line(&points, view), kind))
             .collect();
         // Marge : une extrémité arrondie hors de l'écran reste dessinée entière.
         let visible = screen.with_outset((width as f32 + 4.0, width as f32 + 4.0));
-        let route_color = |ferry: bool| if ferry { self.colors.ferry } else { self.colors.route };
+        let route_color = |kind: Kind| match kind {
+            Kind::Ferry => self.colors.ferry,
+            Kind::TimeTrial => self.colors.time_trial,
+            _ => self.colors.route,
+        };
         if self.theme.stripes {
             // Deux traits de 2/3 décalés d'1/6 qui se chevauchent sous la bande centrale : aucun liseré
             // de fond ne passe entre deux bandes voisines.
-            let stripe_color = |ferry: bool| if ferry { self.colors.ferry } else { self.colors.stripe };
-            for (points, ferry) in &pieces {
+            let stripe_color = |kind: Kind| if kind == Kind::Ferry { self.colors.ferry } else { self.colors.stripe };
+            for (points, kind) in &pieces {
                 let path = visible_path(&offset_line(points, (width / 6.0) as f32), visible);
-                stroke(canvas, &path, (width * 2.0 / 3.0) as f32, stripe_color(*ferry));
+                stroke(canvas, &path, (width * 2.0 / 3.0) as f32, stripe_color(*kind));
             }
-            for (points, ferry) in &pieces {
+            for (points, kind) in &pieces {
                 let path = visible_path(&offset_line(points, (-width / 6.0) as f32), visible);
-                stroke(canvas, &path, (width * 2.0 / 3.0) as f32, route_color(*ferry));
+                stroke(canvas, &path, (width * 2.0 / 3.0) as f32, route_color(*kind));
             }
             for (points, _) in &pieces {
                 stroke(canvas, &visible_path(points, visible), (width / 3.0) as f32, self.colors.core);
             }
         } else {
-            for (points, ferry) in &pieces {
-                stroke(canvas, &visible_path(points, visible), width as f32, route_color(*ferry));
+            for (points, kind) in &pieces {
+                stroke(canvas, &visible_path(points, visible), width as f32, route_color(*kind));
             }
             let core_width = width * self.theme.core_ratio;
             let blur = core_width * self.theme.core_blur_ratio;
-            for (points, _) in &pieces {
+            for (points, kind) in &pieces {
+                if *kind == Kind::TimeTrial {
+                    // Tracé entier, pas seulement sa partie visible : les tirets partent toujours du départ et
+                    // ne glissent pas quand la caméra bouge.
+                    dashed_stroke(canvas, &line_path(points), width as f32, core_width as f32, self.colors.route);
+                    continue;
+                }
                 blurred_stroke(
                     canvas,
                     &visible_path(points, visible),
@@ -253,6 +270,25 @@ fn stroke_paint(width: f32, color: Color) -> Paint {
 
 fn stroke(canvas: &Canvas, path: &skia_safe::Path, width: f32, color: Color) {
     canvas.draw_path(path, &stroke_paint(width, color));
+}
+
+fn line_path(points: &[Point]) -> skia_safe::Path {
+    let mut path = PathBuilder::new();
+    if let Some((first, rest)) = points.split_first() {
+        path.move_to(*first);
+        for &point in rest {
+            path.line_to(point);
+        }
+    }
+    path.detach()
+}
+
+/// Cœur en tirets, aux bouts droits, de la couleur `color`.
+fn dashed_stroke(canvas: &Canvas, path: &skia_safe::Path, width: f32, core_width: f32, color: Color) {
+    let mut paint = stroke_paint(core_width, color);
+    paint.set_stroke_cap(paint::Cap::Butt);
+    paint.set_path_effect(PathEffect::dash(&TIME_TRIAL_DASH.map(|length| length * width), 0.0));
+    canvas.draw_path(path, &paint);
 }
 
 /// `line-blur` : opacité `(bord − distance) / (flou + 1)` bornée à [0, 1], le bord étant à demi-largeur

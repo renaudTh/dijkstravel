@@ -6,18 +6,22 @@
     "coreRatio": 0.4,
     "coreBlurRatio": 0.5,
     "stripes": false,
+    "timeTrialColor": "#ffffff",
     "headRadius": 9
   },
   "stops": {
     "unvisitedColor": "#ffffff",
     "unvisitedRadius": 6,
     "visitedRatio": 0.85,
-    "popRadius": 18,
+    "popRadius": 10,
     "icon": "",
     "showLabels": true,
     "labelSize": 30,
+    "markerLabelSize": 22,
     "startColor": "#1e6fff",
-    "endColor": "#e10600"
+    "endColor": "#e10600",
+    "sprintColor": "#00a650",
+    "climbColor": "#e2001a"
   },
   "basemap": {
     "imagery": "ign",
@@ -48,6 +52,7 @@
   },
   "camera": {
     "followFraction": 0.028,
-    "stopSlowdown": 0.6
+    "stopSlowdown": 0.6,
+    "evenStages": 0.5
   }
 }

@@ -76,6 +76,7 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'checkbox', path: 'route.stripes', label: 'Trois bandes (trait, cœur, bande droite)' },
       { kind: 'color', path: 'route.stripeColor', label: 'Couleur de la bande droite' },
       { kind: 'color', path: 'route.ferryColor', label: 'Couleur des traversées (bac, pirogue)' },
+      { kind: 'color', path: 'route.timeTrialColor', label: 'Couleur des contre-la-montre (cœur en tirets)' },
       { kind: 'range', path: 'route.headRadius', label: 'Rayon de la tête (0 : aucune)', step: 1 },
       { kind: 'color', path: 'route.headColor', label: 'Couleur de la tête' },
       { kind: 'text', path: 'route.headIcon', label: 'Emoji à la tête (⚽…), à la place du point' },
@@ -88,6 +89,8 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'range', path: 'stops.unvisitedRadius', label: 'Rayon des lieux à venir', step: 0.5 },
       { kind: 'text', path: 'stops.startColor', label: 'Couleur du départ (#rrggbb, vide : aucune)' },
       { kind: 'text', path: 'stops.endColor', label: "Couleur de l'arrivée (#rrggbb, vide : aucune)" },
+      { kind: 'color', path: 'stops.sprintColor', label: 'Sprints intermédiaires' },
+      { kind: 'color', path: 'stops.climbColor', label: 'Ascensions classées' },
       { kind: 'range', path: 'stops.visitedRatio', label: 'Rayon des lieux atteints', step: 0.05 },
       { kind: 'range', path: 'stops.popRadius', label: 'Ampleur du « pop »', step: 1 },
       { kind: 'text', path: 'stops.icon', label: 'Emoji sur les lieux atteints (🏟️, 🍺…)' },
@@ -96,6 +99,7 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'range', path: 'stops.imageSize', label: "Taille de l'image sur la carte (px)", step: 1 },
       { kind: 'checkbox', path: 'stops.showLabels', label: 'Nom des lieux atteints sur la carte' },
       { kind: 'range', path: 'stops.labelSize', label: 'Taille des noms (px)', step: 1 },
+      { kind: 'range', path: 'stops.markerLabelSize', label: 'Taille des sprints et ascensions (px)', step: 1 },
     ],
   },
   {
@@ -136,6 +140,8 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
     fields: [
       { kind: 'range', path: 'camera.followFraction', label: "Part de l'emprise visible", step: 0.005 },
       { kind: 'range', path: 'camera.stopSlowdown', label: 'Ralentissement aux lieux', step: 0.1 },
+      { kind: 'range', path: 'camera.markerSlowdown', label: 'Ralentissement aux sprints et ascensions', step: 0.1 },
+      { kind: 'range', path: 'camera.evenStages', label: 'Égaliser la durée des étapes', step: 0.05 },
     ],
   },
 ];

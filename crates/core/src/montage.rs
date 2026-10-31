@@ -130,6 +130,7 @@ impl Montage {
             intro_sec: segment.intro_sec,
             outro_sec: segment.outro_sec,
             fps: self.fps,
+            markers: run.video.markers,
         };
         if segment.title.is_some() {
             run.title = segment.title.clone();

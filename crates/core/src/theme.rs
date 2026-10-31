@@ -33,6 +33,9 @@ pub struct RouteTheme {
     pub stripe_color: String,
     /// Couleur du trait sur les traversées en bateau ; celle du trait si le thème n'en donne pas.
     pub ferry_color: String,
+    /// Couleur du trait sur les étapes contre-la-montre, dont le cœur est en tirets de la couleur du trait ;
+    /// celle du trait si le thème n'en donne pas.
+    pub time_trial_color: String,
     /// Rayon du point posé sur la tête du tracé, en pixels au zoom d'une région ; 0 : pas de point.
     pub head_radius: f64,
     /// Couleur de ce point, cerclé de `color` ; celle du cœur si le thème n'en donne pas.
@@ -47,10 +50,13 @@ pub struct StopsTheme {
     pub unvisited_color: String,
     pub unvisited_radius: f64,
     /// Couleur propre du premier lieu (départ), vide : comme les autres. Il n'apparaît alors qu'une fois
-    /// atteint, plein et cerclé.
+    /// atteint, plein.
     pub start_color: String,
     /// De même pour le dernier lieu (arrivée).
     pub end_color: String,
+    /// Repères d'une étape (`Tour::markers`) : sprints intermédiaires et ascensions classées.
+    pub sprint_color: String,
+    pub climb_color: String,
     /// Rayon d'un lieu atteint, rapporté à la largeur du trait.
     pub visited_ratio: f64,
     /// Rayon ajouté au moment où le lieu est atteint (« pop »).
@@ -65,6 +71,8 @@ pub struct StopsTheme {
     /// Nom du lieu écrit sur la carte dès qu'il est atteint, sauf s'il en chevaucherait un autre.
     pub show_labels: bool,
     pub label_size: f64,
+    /// Noms des sprints et ascensions (`Tour::markers`), en pixels ; leur point grandit avec.
+    pub marker_label_size: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,6 +126,11 @@ pub struct CameraTheme {
     pub follow_fraction: f64,
     /// Ralentissement au passage d'un lieu, rattrapé entre les lieux (2 : trois fois plus lent) ; 0 : allure constante.
     pub stop_slowdown: f64,
+    /// De même au passage d'un sprint ou d'une ascension (`Tour::markers`), sur une zone à l'échelle de l'écran.
+    pub marker_slowdown: f64,
+    /// Durée des étapes (`Tour::stages`) : 0, selon leur longueur ; 1, toutes la même ; entre les deux,
+    /// une étape dure comme sa longueur à la puissance `1 - evenStages`.
+    pub even_stages: f64,
 }
 
 /// Imagerie du fond : `nasa` (Blue Marble, pays et régions), `ign` (orthophoto, villes de France),
@@ -131,7 +144,7 @@ pub const SEA_IMAGERIES: [&str; 4] = ["", "nasa", "ign", "sentinel"];
 pub const HUD_FONTS: [&str; 6] = ["Nunito", "Quicksand", "Fredoka", "Baloo 2", "Poppins", "Comfortaa"];
 
 /// Bornes des réglages numériques, partagées par la validation et les curseurs de l'éditeur.
-pub const NUMBER_RANGES: [(&str, f64, f64); 18] = [
+pub const NUMBER_RANGES: [(&str, f64, f64); 21] = [
     ("route.width", 2.0, 40.0),
     ("route.coreRatio", 0.0, 1.0),
     ("route.coreBlurRatio", 0.0, 1.0),
@@ -142,6 +155,7 @@ pub const NUMBER_RANGES: [(&str, f64, f64); 18] = [
     ("stops.iconSize", 16.0, 160.0),
     ("stops.imageSize", 24.0, 200.0),
     ("stops.labelSize", 12.0, 60.0),
+    ("stops.markerLabelSize", 12.0, 60.0),
     ("basemap.brightness", 0.0, 1.0),
     ("basemap.contrast", -1.0, 1.0),
     ("basemap.saturation", -1.0, 1.0),
@@ -150,6 +164,8 @@ pub const NUMBER_RANGES: [(&str, f64, f64); 18] = [
     ("hud.size", 12.0, 60.0),
     ("camera.followFraction", 0.02, 1.0),
     ("camera.stopSlowdown", 0.0, 5.0),
+    ("camera.markerSlowdown", 0.0, 5.0),
+    ("camera.evenStages", 0.0, 1.0),
 ];
 
 impl Default for Theme {
@@ -165,6 +181,7 @@ impl Default for Theme {
                 stripes: false,
                 stripe_color: s("#ffffff"),
                 ferry_color: s("#702963"),
+                time_trial_color: s("#702963"),
                 head_radius: 0.0,
                 head_color: s("#e0679f"),
                 head_icon: s(""),
@@ -174,6 +191,8 @@ impl Default for Theme {
                 unvisited_radius: 4.0,
                 start_color: s(""),
                 end_color: s(""),
+                sprint_color: s("#00a650"),
+                climb_color: s("#e2001a"),
                 visited_ratio: 0.75,
                 pop_radius: 12.0,
                 icon: s(""),
@@ -182,6 +201,7 @@ impl Default for Theme {
                 image_size: 70.0,
                 show_labels: false,
                 label_size: 28.0,
+                marker_label_size: 21.0,
             },
             basemap: BasemapTheme {
                 imagery: s("nasa"),
@@ -212,7 +232,12 @@ impl Default for Theme {
                 show_last_stop: true,
                 show_image: true,
             },
-            camera: CameraTheme { follow_fraction: 1.0 / 8.0, stop_slowdown: 0.0 },
+            camera: CameraTheme {
+                follow_fraction: 1.0 / 8.0,
+                stop_slowdown: 0.0,
+                marker_slowdown: 0.0,
+                even_stages: 0.0,
+            },
         }
     }
 }
@@ -299,6 +324,7 @@ impl Theme {
                 stripes: r.flag("route.stripes", d.route.stripes),
                 stripe_color: r.color("route.stripeColor", &d.route.stripe_color),
                 ferry_color: r.color("route.ferryColor", &route_color),
+                time_trial_color: r.color("route.timeTrialColor", &route_color),
                 head_radius: r.number("route.headRadius", d.route.head_radius),
                 head_color: r.color("route.headColor", &core_color),
                 head_icon: r.emoji("route.headIcon", &d.route.head_icon),
@@ -310,6 +336,8 @@ impl Theme {
                 unvisited_radius: r.number("stops.unvisitedRadius", d.stops.unvisited_radius),
                 start_color: r.optional_color("stops.startColor", &d.stops.start_color),
                 end_color: r.optional_color("stops.endColor", &d.stops.end_color),
+                sprint_color: r.color("stops.sprintColor", &d.stops.sprint_color),
+                climb_color: r.color("stops.climbColor", &d.stops.climb_color),
                 visited_ratio: r.number("stops.visitedRatio", d.stops.visited_ratio),
                 pop_radius: r.number("stops.popRadius", d.stops.pop_radius),
                 icon: r.emoji("stops.icon", &d.stops.icon),
@@ -318,6 +346,7 @@ impl Theme {
                 image_size: r.number("stops.imageSize", d.stops.image_size),
                 show_labels: r.flag("stops.showLabels", d.stops.show_labels),
                 label_size: r.number("stops.labelSize", d.stops.label_size),
+                marker_label_size: r.number("stops.markerLabelSize", d.stops.marker_label_size),
             },
             basemap: BasemapTheme {
                 imagery: r.choice("basemap.imagery", &d.basemap.imagery, &IMAGERIES),
@@ -351,6 +380,8 @@ impl Theme {
             camera: CameraTheme {
                 follow_fraction: r.number("camera.followFraction", d.camera.follow_fraction),
                 stop_slowdown: r.number("camera.stopSlowdown", d.camera.stop_slowdown),
+                marker_slowdown: r.number("camera.markerSlowdown", d.camera.marker_slowdown),
+                even_stages: r.number("camera.evenStages", d.camera.even_stages),
             },
         };
         if r.issues.is_empty() { Ok(theme) } else { Err(r.issues) }
@@ -382,9 +413,10 @@ mod tests {
     }
 
     #[test]
-    fn derives_ferry_and_head_colors_from_the_route() {
+    fn derives_ferry_time_trial_and_head_colors_from_the_route() {
         let theme = Theme::parse(&json!({ "route": { "color": "#112233", "coreColor": "#445566" } })).unwrap();
         assert_eq!(theme.route.ferry_color, "#112233");
+        assert_eq!(theme.route.time_trial_color, "#112233");
         assert_eq!(theme.route.head_color, "#445566");
     }
 

@@ -11,6 +11,7 @@ pub mod frame;
 pub mod hillshade;
 pub mod hud;
 pub mod infra;
+pub mod markers;
 pub mod mercator;
 pub mod model;
 pub mod monitor;

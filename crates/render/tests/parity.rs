@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use dijkstravel_render::frame::{Animation, Moment};
 use dijkstravel_render::geo::{LonLat, split_crossings};
-use dijkstravel_render::model::{Tour, Video};
+use dijkstravel_render::model::{CameraTheme, Tour, Video};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -117,7 +117,16 @@ fn check(file: &Path) {
     let fixture: Fixture = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
     let name = &fixture.name;
     let tour = std::sync::Arc::new(fixture.tour.clone());
-    let animation = Animation::new(tour, &fixture.video, fixture.follow_fraction, fixture.slowdown);
+    let animation = Animation::new(
+        tour,
+        &fixture.video,
+        &CameraTheme {
+            follow_fraction: fixture.follow_fraction,
+            stop_slowdown: fixture.slowdown,
+            marker_slowdown: 0.0,
+            even_stages: 0.0,
+        },
+    );
     assert_eq!(animation.timeline.frame_count(), fixture.frame_count, "{name} : nombre d'images");
 
     for case in &fixture.frames {

@@ -10,6 +10,7 @@ use skia_safe::{Canvas, EncodedImageFormat, Rect, Surface, surfaces};
 use crate::atlas::Atlas;
 use crate::frame::{Animation, Camera, Moment};
 use crate::hud::{Hud, HudFrame};
+use crate::markers::Markers;
 use crate::model::{Input, Tour, Video};
 use crate::route::Route;
 use crate::sprites::Fonts;
@@ -54,6 +55,7 @@ pub struct Renderer {
     transfer_atlas: Option<Atlas>,
     route: Route,
     stops: Stops,
+    markers: Markers,
     hud: Hud,
 }
 
@@ -62,8 +64,7 @@ impl Renderer {
     /// d'aucun réglage changé, avec ses morceaux déjà calculés.
     pub fn new(input: Input, tour: Arc<Tour>, previous: Option<&Renderer>) -> Self {
         let theme = &input.theme;
-        let animation =
-            Animation::new(tour.clone(), &input.video, theme.camera.follow_fraction, theme.camera.stop_slowdown);
+        let animation = Animation::new(tour.clone(), &input.video, &theme.camera);
         let travel_zoom = animation.travel_zoom();
         let atlas = match previous {
             Some(previous) if previous.atlas.serves(travel_zoom, &input) => previous.atlas.clone(),
@@ -88,10 +89,25 @@ impl Renderer {
                 &tour.path,
                 &tour.ferries,
                 &tour.transfers,
+                &tour
+                    .stages
+                    .iter()
+                    .filter(|stage| stage.time_trial)
+                    .map(|stage| [stage.from, stage.to])
+                    .collect::<Vec<_>>(),
                 &theme.route,
                 fonts.emoji(&theme.route.head_icon),
             ),
             stops: Stops::new(&input, &tour, theme, &fonts),
+            markers: Markers::new(
+                &tour,
+                theme,
+                &fonts,
+                |meters| {
+                    atlas.view(animation.camera_at(Moment::Travel { meters }), input.video.width, input.video.height)
+                },
+                input.video.width as f32,
+            ),
             hud: Hud::new(
                 &theme.hud,
                 &input.title,
@@ -229,6 +245,7 @@ impl Frames for Renderer {
             Moment::Outro { progress } if self.fade_labels_at_outro => (1.0 - progress / LABEL_FADE_PROGRESS).max(0.0),
             _ => 1.0,
         };
+        self.markers.draw(canvas, &view, screen, meters, pop_meters, label_opacity as f32);
         let stops_frame = StopsFrame { visited: hud.visited, meters, pop_meters, label_opacity: label_opacity as f32 };
         self.stops.draw(canvas, &view, screen, &stops_frame);
         if with_hud {

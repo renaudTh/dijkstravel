@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::geo::LonLat;
-use crate::model::{Tour, Video};
+use crate::model::{CameraTheme, Tour, Video};
 
 /// En nombre d'images.
 #[derive(Debug, Clone, Copy)]
@@ -62,6 +62,8 @@ const SLOW_ZONE: f64 = 0.25;
 const TRANSFER_SCREENS: f64 = 0.5;
 /// Part de chaque bout d'un transfert sur laquelle se fait le fondu vers son fond, et retour.
 const TRANSFER_FADE: f64 = 0.25;
+/// Demi-zone de ralentissement autour d'un repère, en écrans (petit côté) : la caméra freine en l'approchant.
+const MARKER_SCREENS: f64 = 0.6;
 
 fn progress_of(index: u32, count: u32) -> f64 {
     if count <= 1 { 1.0 } else { (f64::from(index) / f64::from(count - 1)).min(1.0) }
@@ -86,12 +88,18 @@ pub struct Animation {
 }
 
 impl Animation {
-    pub fn new(tour: Arc<Tour>, video: &Video, follow_fraction: f64, slowdown: f64) -> Self {
+    pub fn new(tour: Arc<Tour>, video: &Video, camera: &CameraTheme) -> Self {
+        let follow_fraction = camera.follow_fraction;
         let total = tour.path.total_meters();
         let overview = overview(&tour);
-        let transfer_meters = TRANSFER_SCREENS * visible_meters(overview, travel_zoom(overview, follow_fraction));
-        let paced = slowdown != 0.0 || !tour.transfers.is_empty();
-        let pace = (paced && total != 0.0).then(|| pace_of(&tour, total, slowdown, transfer_meters));
+        let screen = visible_meters(overview, travel_zoom(overview, follow_fraction));
+        let zones = Zones { transfer: TRANSFER_SCREENS * screen, marker: MARKER_SCREENS * screen };
+        let paced = camera.stop_slowdown != 0.0
+            || !tour.transfers.is_empty()
+            || (camera.even_stages != 0.0 && !tour.stages.is_empty())
+            || (camera.marker_slowdown != 0.0 && !tour.markers.is_empty());
+        let pace = (paced && total != 0.0).then(|| pace_of(&tour, total, camera, zones));
+        let transfer_meters = zones.transfer;
         Animation { tour, timeline: Timeline::new(video), follow_fraction, total, pace, overview, transfer_meters }
     }
 
@@ -153,7 +161,11 @@ impl Animation {
             total_meters: self.tour.raced_meters(self.total),
             visited,
             total: stops.len(),
-            last_stop: visited.checked_sub(1).map(|i| stops[i].name.clone()),
+            // Une course par étapes affiche l'étape en cours plutôt que le dernier lieu.
+            last_stop: match self.tour.stage_at(clamped) {
+                Some(stage) => Some(stage.name.clone()),
+                None => visited.checked_sub(1).map(|i| stops[i].name.clone()),
+            },
         }
     }
 
@@ -194,16 +206,29 @@ fn visible_meters(overview: Camera, zoom: f64) -> f64 {
     (WORLD_METERS * overview.center[1].to_radians().cos() * SCREEN_PIXELS) / (512.0 * 2f64.powf(zoom))
 }
 
-/// `transfer_meters` : un transfert dure au plus le temps de parcourir cette distance en course.
-fn pace_of(tour: &Tour, total: f64, slowdown: f64, transfer_meters: f64) -> Pace {
+/// Longueurs de parcours à l'échelle de l'écran.
+#[derive(Clone, Copy)]
+struct Zones {
+    /// Un transfert dure au plus le temps de parcourir cette distance en course.
+    transfer: f64,
+    /// Demi-zone de ralentissement autour d'un repère.
+    marker: f64,
+}
+
+fn pace_of(tour: &Tour, total: f64, camera: &CameraTheme, zones: Zones) -> Pace {
     let radius = (SLOW_ZONE * total) / (tour.stops.len().max(1) as f64);
     let meters: Vec<f64> = (0..=PACE_SAMPLES).map(|i| (total * i as f64) / PACE_SAMPLES as f64).collect();
     // Le plus fort ralentissement, pas leur somme : un groupe de lieux proches ne s'éternise pas.
     let slowness: Vec<f64> = meters
         .iter()
         .map(|&at| {
-            let strongest = tour.stops.iter().map(|stop| bump((at - stop.meters).abs() / radius)).fold(0.0, f64::max);
-            (1.0 + slowdown * strongest) * transfer_slowness(at, &tour.transfers, transfer_meters)
+            let near_stop = tour.stops.iter().map(|stop| bump((at - stop.meters).abs() / radius)).fold(0.0, f64::max);
+            let near_marker =
+                tour.markers.iter().map(|marker| bump((at - marker.meters).abs() / zones.marker)).fold(0.0, f64::max);
+            let braking = (camera.stop_slowdown * near_stop).max(camera.marker_slowdown * near_marker);
+            (1.0 + braking)
+                * stage_slowness(tour, at, camera.even_stages)
+                * transfer_slowness(at, &tour.transfers, zones.transfer)
         })
         .collect();
     let mut time = vec![0.0];
@@ -212,6 +237,30 @@ fn pace_of(tour: &Tour, total: f64, slowdown: f64, transfer_meters: f64) -> Pace
         time.push(time[i - 1] + step);
     }
     Pace { meters, time }
+}
+
+/// Lenteur relative dans une étape de longueur `L` : `(L / moyenne)^-evenStages`, si bien qu'elle dure
+/// comme `L^(1 - evenStages)`. Entre deux étapes, elle passe en douceur de l'une à l'autre.
+fn stage_slowness(tour: &Tour, at: f64, even_stages: f64) -> f64 {
+    let stages = &tour.stages;
+    if even_stages == 0.0 || stages.is_empty() {
+        return 1.0;
+    }
+    let mean = stages.iter().map(|stage| stage.to - stage.from).sum::<f64>() / stages.len() as f64;
+    let slowness = |i: usize| {
+        let length = (stages[i].to - stages[i].from).max(1.0);
+        (length / mean).powf(-even_stages)
+    };
+    let next = stages.iter().position(|stage| at < stage.from);
+    match next {
+        Some(0) => slowness(0),
+        None => slowness(stages.len() - 1),
+        Some(i) if at <= stages[i - 1].to => slowness(i - 1),
+        Some(i) => {
+            let (from, to) = (stages[i - 1].to, stages[i].from);
+            lerp(slowness(i - 1), slowness(i), smoothstep((at - from) / (to - from)))
+        }
+    }
 }
 
 /// Part du fond des transferts : elle monte au début du transfert et retombe à sa fin. Un transfert
@@ -309,5 +358,20 @@ mod tests {
         assert_eq!([0.0, 500.0, 1000.0, 1200.0].map(blend), [0.0, 1.0, 0.0, 0.0]);
         assert!(blend(50.0) > 0.0 && blend(50.0) < 0.5 && (blend(50.0) - blend(950.0)).abs() < 1e-9);
         assert!((transfer_blend(5.0, &[[0.0, 10.0]], 100.0) - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn even_stages_slow_down_the_short_stages_and_blend_across_the_transfer() {
+        let text = r#"{"run":"r","mode":"open","start":[0,0],"path":{"points":[[0,0],[0,1]],"meters":[0,500]},"stops":[],"excluded":[],"transfers":[[100,200]],"stages":[{"name":"1","from":0,"to":100},{"name":"2","from":200,"to":500}],"routedMeters":500}"#;
+        let tour = Tour::parse(text).unwrap();
+        let slowness = |at: f64, even: f64| stage_slowness(&tour, at, even);
+        assert_eq!([50.0, 300.0].map(|at| slowness(at, 0.0)), [1.0, 1.0]);
+        // Moyenne 200 m : l'étape de 100 m est √2 fois plus lente, celle de 300 m √1,5 fois plus rapide.
+        assert!((slowness(50.0, 0.5) - 2f64.sqrt()).abs() < 1e-9);
+        assert!((slowness(300.0, 0.5) - 1.5f64.powf(-0.5)).abs() < 1e-9);
+        // Avec evenStages à 1, les deux étapes durent pareil.
+        assert!((slowness(50.0, 1.0) * 100.0 - slowness(300.0, 1.0) * 300.0).abs() < 1e-9);
+        let middle = slowness(150.0, 0.5);
+        assert!(middle < slowness(50.0, 0.5) && middle > slowness(300.0, 0.5));
     }
 }
