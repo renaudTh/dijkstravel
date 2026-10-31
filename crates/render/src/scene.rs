@@ -117,17 +117,19 @@ impl Scene {
         seconds.map_or(all, |seconds| ((seconds * f64::from(self.run.video.fps)).round() as u32).min(all))
     }
 
-    /// La vidéo (ou ses `seconds` premières secondes) dans `out`, tuiles téléchargées avant.
+    /// La vidéo (ou ses `seconds` premières secondes) dans `out`, tuiles téléchargées avant ; `with_hud` :
+    /// avec la carte d'infos.
     pub fn encode_video(
         &self,
         renderer: &dyn Frames,
         seconds: Option<f64>,
+        with_hud: bool,
         threads: usize,
         out: &str,
         monitor: &dyn Monitor,
     ) -> Result<(), String> {
         let frames = self.frames_in(renderer, seconds);
         self.prefetch(renderer, 0..frames, monitor)?;
-        video::encode_video(renderer, frames, threads, out, monitor)
+        video::encode_video(renderer, frames, with_hud, threads, out, monitor)
     }
 }

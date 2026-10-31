@@ -1,5 +1,6 @@
 //! `dijkstravel render runs/<montage>` quand le dossier contient `montage.json` : les runs des
-//! segments, déjà calculés et voisins du montage, rendus à la suite dans `data/out/<montage>/video.mp4`.
+//! segments, déjà calculés et voisins du montage, rendus à la suite dans `data/out/<montage>/video.mp4`
+//! (`video-sans-carte.mp4` avec `--no-hud`).
 
 use std::path::{Path, PathBuf};
 
@@ -21,7 +22,7 @@ pub fn load(arg: &Path) -> Outcome<Montage> {
         .map_err(|issues| Failure(issues.iter().map(|issue| format!("{} : {issue}", file.display())).collect()))
 }
 
-pub fn render(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: Option<u32>) -> Outcome {
+pub fn render(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: Option<u32>, with_hud: bool) -> Outcome {
     let montage = load(arg)?;
     let runs_dir = arg.parent().map_or_else(PathBuf::new, Path::to_owned);
     let mut scenes = Vec::new();
@@ -60,15 +61,15 @@ pub fn render(arg: &Path, seconds: Option<f64>, threads: Option<usize>, frame: O
     std::fs::create_dir_all(&out)?;
     if let Some(frame) = frame {
         let file = out.join(format!("frame-{frame}.png"));
-        write_image(&scene.still(&frames, frame, true, &console)?, &file)?;
+        write_image(&scene.still(&frames, frame, with_hud, &console)?, &file)?;
         println!("{}", file.display());
         return Ok(());
     }
     if frames.frame_count() == 0 {
         return fail("montage vide");
     }
-    let video = out.join("video.mp4");
-    scene.encode_video(&frames, seconds, threads_or_all(threads), &video.display().to_string(), &console)?;
+    let video = out.join(if with_hud { "video.mp4" } else { "video-sans-carte.mp4" });
+    scene.encode_video(&frames, seconds, with_hud, threads_or_all(threads), &video.display().to_string(), &console)?;
     println!("{}", video.display());
     Ok(())
 }

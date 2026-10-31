@@ -1,7 +1,10 @@
 //! `dijkstravel render runs/<nom>` → `data/out/<nom>/video.mp4`, par le moteur natif (sans GPU), à
 //! partir du seul `tour.json`. Tout ce que lit le moteur est téléchargé avant, dans `data/cache/`.
-//! La vue est à plat ; `--3d` la rend en relief, caméra inclinée, dans `video-3d.mp4`. `--duration n` rend une variante de n secondes de trajet, dans `video-<n>s.mp4` ; `--stop-slowdown n`
-//! une variante qui freine autant aux lieux, dans `video-ralenti-<n>.mp4`. Un dossier qui contient
+//! La vue est à plat ; `--3d` la rend en relief, caméra inclinée et un peu plus serrée, dans `video-3d.mp4`.
+//! `--zoom n` rapproche la caméra du parcours n fois (`video-zoom-<n>.mp4`) ; `--no-hud` la rend sans la
+//! carte d'infos (`video-sans-carte.mp4`). `--duration n` rend une variante de n secondes de trajet, dans
+//! `video-<n>s.mp4` ; `--stop-slowdown n` une variante qui freine autant aux lieux, dans
+//! `video-ralenti-<n>.mp4`. Un dossier qui contient
 //! `montage.json` se rend comme un montage (`montage.rs`).
 
 use std::path::{Path, PathBuf};
@@ -19,6 +22,8 @@ use crate::montage;
 pub const CACHE_DIR: &str = "data/cache";
 /// Inclinaison de `--3d` quand le thème n'en donne pas.
 const RELIEF_PITCH: f64 = 55.0;
+/// `--3d` resserre la caméra du parcours d'autant : l'inclinaison éloigne le sol au fond de l'écran.
+const RELIEF_ZOOM: f64 = 1.15;
 
 /// La scène du run, depuis ses fichiers ; les images de lieux introuvables sont signalées.
 pub fn scene(arg: &Path) -> Outcome<(Scene, RunPaths)> {
@@ -53,7 +58,7 @@ pub fn scene_of(run: Run, paths: &RunPaths, arg: &Path) -> Outcome<Scene> {
 }
 
 /// Réglages du run ou du thème forcés pour un rendu, sans toucher leurs fichiers.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Variant {
     /// À la place de `durationSec` du run.
     pub duration: Option<f64>,
@@ -63,16 +68,22 @@ pub struct Variant {
     pub no_slowdown: bool,
     /// En relief : sinon la caméra reste à plat, quel que soit `camera.pitch` du thème.
     pub relief: bool,
+    /// Sans la carte d'infos (titre, distance, lieu, profil).
+    pub no_hud: bool,
+    /// Multiplie `camera.zoom` du thème : la caméra du parcours se rapproche d'autant, son lissage ne change pas.
+    pub zoom: Option<f64>,
 }
 
 impl Variant {
-    /// Les options de `render` qui la produisent, ` --duration 60 --stop-slowdown 2 --3d`.
+    /// Les options de `render` qui la produisent, ` --duration 60 --stop-slowdown 2 --3d --zoom 1.5`.
     pub fn options(&self) -> String {
         let duration = self.duration.map(|duration| format!(" --duration {duration}"));
         let slowdown = self.stop_slowdown.map(|slowdown| format!(" --stop-slowdown {slowdown}"));
         let none = if self.no_slowdown { " --no-slowdown" } else { "" };
         let relief = if self.relief { " --3d" } else { "" };
-        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + none + relief
+        let zoom = self.zoom.map(|zoom| format!(" --zoom {zoom}"));
+        let hud = if self.no_hud { " --no-hud" } else { "" };
+        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + none + relief + &zoom.unwrap_or_default() + hud
     }
 
     /// Le thème avec les réglages forcés.
@@ -89,20 +100,28 @@ impl Variant {
             (true, pitch) if pitch > 0.0 => pitch,
             (true, _) => RELIEF_PITCH,
         };
+        theme.camera.zoom *= self.zoom.unwrap_or(1.0) * if self.relief { RELIEF_ZOOM } else { 1.0 };
     }
 
-    /// Suffixe des fichiers rendus, `-60s-ralenti-2-3d`.
+    /// Suffixe d'une image seule (`--frame`) : relief et zoom ; sans carte, elle garde son nom.
+    fn frame_suffix(&self) -> String {
+        Variant { relief: self.relief, zoom: self.zoom, ..Variant::default() }.suffix()
+    }
+
+    /// Suffixe des fichiers rendus, `-60s-ralenti-2-3d-zoom-1.5-sans-carte`.
     fn suffix(&self) -> String {
         let duration = self.duration.map(|duration| format!("-{duration}s"));
         let slowdown = self.stop_slowdown.map(|slowdown| format!("-ralenti-{slowdown}"));
         let none = if self.no_slowdown { "-sans-ralenti" } else { "" };
         let relief = if self.relief { "-3d" } else { "" };
-        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + none + relief
+        let zoom = self.zoom.map(|zoom| format!("-zoom-{zoom}"));
+        let hud = if self.no_hud { "-sans-carte" } else { "" };
+        duration.unwrap_or_default() + &slowdown.unwrap_or_default() + none + relief + &zoom.unwrap_or_default() + hud
     }
 }
 
-/// `video.mp4`, ou la variante `video-<n>s-ralenti-<m>-3d.mp4` d'une durée, d'un ralentissement ou d'un
-/// relief forcés.
+/// `video.mp4`, ou la variante `video-<n>s-ralenti-<m>-3d-zoom-<z>-sans-carte.mp4` d'une durée, d'un
+/// ralentissement, d'un relief, d'un zoom forcés ou sans carte d'infos.
 pub fn video_file(paths: &RunPaths, variant: Variant) -> PathBuf {
     match variant.suffix() {
         suffix if suffix.is_empty() => paths.video.clone(),
@@ -120,14 +139,8 @@ pub fn write_image(image: &Image, out: &Path) -> Outcome {
     load::write_file(out, bytes)
 }
 
-/// `frame` : l'image seule, et si elle porte la carte d'infos.
-pub fn main(
-    arg: &Path,
-    seconds: Option<f64>,
-    variant: Variant,
-    threads: Option<usize>,
-    frame: Option<(u32, bool)>,
-) -> Outcome {
+/// `frame` : l'image seule.
+pub fn main(arg: &Path, seconds: Option<f64>, variant: Variant, threads: Option<usize>, frame: Option<u32>) -> Outcome {
     let positive = |value: Option<f64>| value.is_none_or(|value| value.is_finite() && value > 0.0);
     if !positive(seconds) || !positive(variant.duration) || threads == Some(0) {
         return fail("--seconds et --duration attendent un nombre > 0, --threads un entier > 0");
@@ -135,13 +148,21 @@ pub fn main(
     if variant.stop_slowdown.is_some_and(|slowdown| !(0.0..=5.0).contains(&slowdown)) {
         return fail("--stop-slowdown attend un nombre de 0 à 5");
     }
+    if variant.zoom.is_some_and(|zoom| !(0.25..=4.0).contains(&zoom)) {
+        return fail("--zoom attend un nombre de 0.25 à 4");
+    }
     if montage::is_montage(arg) {
-        if variant.duration.is_some() || variant.stop_slowdown.is_some() || variant.no_slowdown || variant.relief {
+        if variant.duration.is_some()
+            || variant.stop_slowdown.is_some()
+            || variant.no_slowdown
+            || variant.relief
+            || variant.zoom.is_some()
+        {
             return fail(
-                "--duration, --stop-slowdown, --no-slowdown et --3d ne s'appliquent pas à un montage : régler chaque segment et son thème",
+                "--duration, --stop-slowdown, --no-slowdown, --3d et --zoom ne s'appliquent pas à un montage : régler chaque segment et son thème",
             );
         }
-        return montage::render(arg, seconds, threads, frame.map(|(frame, _)| frame));
+        return montage::render(arg, seconds, threads, frame, !variant.no_hud);
     }
     let (scene, paths) = scene_lasting(arg, variant.duration)?;
     let mut theme = load::theme(&scene.run)?;
@@ -149,15 +170,15 @@ pub fn main(
     let renderer = scene.renderer(theme, None)?;
     std::fs::create_dir_all(&paths.out)?;
     let console = console(&scene);
-    if let Some((frame, with_hud)) = frame {
-        let out = paths.out.join(format!("frame-{frame}{}.png", if variant.relief { "-3d" } else { "" }));
-        write_image(&scene.still(&renderer, frame, with_hud, &console)?, &out)?;
+    if let Some(frame) = frame {
+        let out = paths.out.join(format!("frame-{frame}{}.png", variant.frame_suffix()));
+        write_image(&scene.still(&renderer, frame, !variant.no_hud, &console)?, &out)?;
         println!("{}", out.display());
         return Ok(());
     }
     let threads = threads_or_all(threads);
     let video = video_file(&paths, variant);
-    scene.encode_video(&renderer, seconds, threads, &video.display().to_string(), &console)?;
+    scene.encode_video(&renderer, seconds, !variant.no_hud, threads, &video.display().to_string(), &console)?;
     println!("{}", video.display());
     Ok(())
 }

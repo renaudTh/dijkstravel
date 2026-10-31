@@ -56,12 +56,18 @@ enum Command {
         /// L'image n seule, dans `data/out/<nom>/frame-<n>.png`.
         #[arg(long)]
         frame: Option<u32>,
-        /// Avec `--frame` : sans la carte d'infos (vignettes, couvertures composées à la main).
-        #[arg(long, requires = "frame")]
+        /// Sans la carte d'infos (titre, distance, lieu, profil) ; écrit `video-sans-carte.mp4`. Avec
+        /// `--frame`, l'image garde son nom (vignettes, couvertures composées à la main).
+        #[arg(long)]
         no_hud: bool,
-        /// En relief, caméra inclinée (`camera.pitch` du thème, 55° s'il n'en a pas) ; écrit `video-3d.mp4`.
+        /// En relief, caméra inclinée (`camera.pitch` du thème, 55° s'il n'en a pas) et un peu plus serrée ;
+        /// écrit `video-3d.mp4`.
         #[arg(long = "3d")]
         relief: bool,
+        /// Rapproche la caméra du parcours n fois (1.5 : plus près, 0.8 : plus loin), en plus du resserrement
+        /// de `--3d` ; écrit `video-zoom-<n>.mp4`.
+        #[arg(long)]
+        zoom: Option<f64>,
     },
     /// Légende prête à coller (`publication.txt`) et couverture (`cover.jpg`) du run.
     Publication { run: PathBuf },
@@ -83,6 +89,12 @@ enum Command {
         /// Envoie la variante en relief (`render --3d`).
         #[arg(long = "3d")]
         relief: bool,
+        /// Envoie la variante rendue avec `render --zoom n`.
+        #[arg(long)]
+        zoom: Option<f64>,
+        /// Envoie la variante sans carte d'infos (`render --no-hud`).
+        #[arg(long)]
+        no_hud: bool,
     },
     /// Éditeur du thème du run, sur sa tournée déjà calculée, dans le navigateur.
     Editor { run: PathBuf },
@@ -99,19 +111,28 @@ fn main() -> ExitCode {
     let outcome = match Cli::parse().command {
         Command::Validate { run } => validate(&run),
         Command::Solve { run } => solve::main(&run),
-        Command::Render { run, seconds, duration, stop_slowdown, no_slowdown, threads, frame, no_hud, relief } => {
-            render::main(
-                &run,
-                seconds,
-                render::Variant { duration, stop_slowdown, no_slowdown, relief },
-                threads,
-                frame.map(|frame| (frame, !no_hud)),
-            )
-        }
+        Command::Render {
+            run,
+            seconds,
+            duration,
+            stop_slowdown,
+            no_slowdown,
+            threads,
+            frame,
+            no_hud,
+            relief,
+            zoom,
+        } => render::main(
+            &run,
+            seconds,
+            render::Variant { duration, stop_slowdown, no_slowdown, relief, zoom, no_hud },
+            threads,
+            frame,
+        ),
         Command::Publication { run } => publication::main(&run),
         Command::Source(source) => source::main(source),
-        Command::Upload { run, duration, stop_slowdown, no_slowdown, relief } => {
-            upload::main(&run, render::Variant { duration, stop_slowdown, no_slowdown, relief })
+        Command::Upload { run, duration, stop_slowdown, no_slowdown, relief, zoom, no_hud } => {
+            upload::main(&run, render::Variant { duration, stop_slowdown, no_slowdown, relief, zoom, no_hud })
         }
         Command::Editor { run } => editor::main(&run),
     };

@@ -15,10 +15,11 @@ use crate::render::Frames;
 /// Images rendues d'avance par thread au plus : borne la mémoire quand une image tarde.
 const AHEAD_PER_THREAD: u32 = 2;
 
-/// Les `frames` premières images, encodées dans `out` (MP4 H.264).
+/// Les `frames` premières images, encodées dans `out` (MP4 H.264) ; `with_hud` : avec la carte d'infos.
 pub fn encode_video(
     renderer: &dyn Frames,
     frames: u32,
+    with_hud: bool,
     threads: usize,
     out: &str,
     monitor: &dyn Monitor,
@@ -58,7 +59,7 @@ pub fn encode_video(
                             count = changed.wait(count).unwrap();
                         }
                     }
-                    renderer.draw(surface.canvas(), frame, true);
+                    renderer.draw(surface.canvas(), frame, with_hud);
                     let pixels = surface.peek_pixels().expect("pixels de la surface");
                     let yuv = to_yuv420(
                         pixels.bytes().expect("pixels"),

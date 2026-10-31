@@ -1,8 +1,8 @@
 //! `dijkstravel upload runs/<nom>` : envoie la vidéo, la couverture et `publication.txt` du run ou du
 //! montage dans `Documents/dijkstravel/<nom>/` du Nextcloud décrit dans `.env` (fichiers déjà présents
 //! remplacés).
-//! `--duration n`, `--stop-slowdown n`, `--no-slowdown` et `--3d` envoient la variante rendue avec les mêmes options à la place de
-//! `video.mp4`.
+//! `--duration n`, `--stop-slowdown n`, `--no-slowdown`, `--3d`, `--zoom n` et `--no-hud` envoient la
+//! variante rendue avec les mêmes options à la place de `video.mp4`.
 
 use std::path::{Path, PathBuf};
 
@@ -96,8 +96,8 @@ pub fn main(arg: &Path, variant: render::Variant) -> Outcome {
         return fail("NEXTCLOUD_URL, NEXTCLOUD_USER et NEXTCLOUD_APP_PASSWORD attendus dans .env");
     };
     let (name, paths) = if montage::is_montage(arg) {
-        if !variant.options().is_empty() {
-            return fail("--duration et --stop-slowdown ne s'appliquent pas à un montage");
+        if !(render::Variant { no_hud: false, ..variant }).options().is_empty() {
+            return fail("seul --no-hud s'applique à un montage");
         }
         let montage = montage::load(arg)?;
         let paths = RunPaths::of(arg, &montage.name);
