@@ -6,7 +6,7 @@ use skia_safe::{BlendMode, Canvas, Color, Contains, Image, Paint, PathBuilder, P
 
 use crate::color::parse_color;
 use crate::geo::{LonLat, MeasuredPath};
-use crate::mercator::View;
+use crate::mercator::Projection;
 use crate::model::RouteTheme;
 
 /// Points du tracé dessiné au plus : renvoyer un million de points à chaque image coûterait trop cher.
@@ -83,7 +83,7 @@ impl Route {
         }
     }
 
-    pub fn draw(&self, canvas: &Canvas, view: &View, screen: Rect, meters: f64) {
+    pub fn draw(&self, canvas: &Canvas, view: &dyn Projection, screen: Rect, meters: f64) {
         if meters <= 0.0 {
             return;
         }
@@ -94,7 +94,7 @@ impl Route {
             .pieces(meters)
             .into_iter()
             .filter(|(_, kind)| *kind != Kind::Transfer)
-            .map(|(points, kind)| (screen_line(&points, view), kind))
+            .flat_map(|(points, kind)| screen_lines(&points, view).into_iter().map(move |line| (line, kind)))
             .collect();
         // Marge : une extrémité arrondie hors de l'écran reste dessinée entière.
         let visible = screen.with_outset((width as f32 + 4.0, width as f32 + 4.0));
@@ -157,12 +157,14 @@ impl Route {
     }
 
     /// Tête : seulement pendant le parcours (ni avant le départ, ni sur la vue d'ensemble finale).
-    pub fn draw_head(&self, canvas: &Canvas, view: &View, meters: f64) {
+    pub fn draw_head(&self, canvas: &Canvas, view: &dyn Projection, meters: f64) {
         if self.theme.head_radius == 0.0 {
             return;
         }
         let ratio = zoom_ratio(view.camera_zoom());
-        let [x, y] = view.to_screen(self.drawn.point_at(meters));
+        let Some([x, y]) = view.screen_point(self.drawn.point_at(meters)) else {
+            return;
+        };
         let center = Point::new(x as f32, y as f32);
         if let Some(icon) = &self.head_icon {
             // Diamètre : deux fois `headRadius`, comme le point qu'il remplace.
@@ -189,19 +191,31 @@ pub fn draw_icon(canvas: &Canvas, image: &Image, dest: Rect, opacity: f32) {
     canvas.draw_image_rect_with_sampling_options(image, None, dest, sampling, &paint);
 }
 
-/// Tracé à l'écran, sans les points à moins d'un quart de pixel du précédent.
-fn screen_line(points: &[LonLat], view: &View) -> Vec<Point> {
-    let mut line: Vec<Point> = Vec::with_capacity(points.len());
-    let last = points.len().saturating_sub(1);
-    for (i, &point) in points.iter().enumerate() {
-        let [x, y] = view.to_screen(point);
-        let p = Point::new(x as f32, y as f32);
+/// Tracé à l'écran, sans les points à moins d'un quart de pixel du précédent ; coupé là où il ne se voit
+/// pas (derrière la caméra, caché par le relief).
+fn screen_lines(points: &[LonLat], view: &dyn Projection) -> Vec<Vec<Point>> {
+    let screen: Vec<Option<Point>> =
+        points.iter().map(|&point| view.screen_point(point).map(|[x, y]| Point::new(x as f32, y as f32))).collect();
+    let mut lines = Vec::new();
+    let mut line: Vec<Point> = Vec::new();
+    for (i, p) in screen.iter().enumerate() {
+        let Some(p) = *p else {
+            if !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            continue;
+        };
+        // Le dernier point visible d'un morceau est toujours gardé.
+        let last = screen.get(i + 1).is_none_or(Option::is_none);
         match line.last() {
-            Some(previous) if i != last && (p - *previous).length() < 0.25 => {}
+            Some(previous) if !last && (p - *previous).length() < 0.25 => {}
             _ => line.push(p),
         }
     }
-    line
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 /// Ligne décalée de `distance` pixels vers la droite du sens de parcours (`line-offset`), jointures en

@@ -21,6 +21,15 @@ pub fn unproject([x, y]: [f64; 2], zoom: f64) -> LonLat {
     [lon, lat]
 }
 
+/// Passage du monde à l'écran d'une image, à plat (`View`) ou en perspective : ce que lisent le tracé,
+/// les lieux et les repères.
+pub trait Projection {
+    /// Le point à l'écran ; `None` s'il ne s'y voit pas (derrière la caméra, caché par le relief).
+    fn screen_point(&self, point: LonLat) -> Option<[f64; 2]>;
+    /// Zoom effectif de l'image, pour les tailles qui en dépendent (`byZoom`).
+    fn camera_zoom(&self) -> f64;
+}
+
 /// Passage du monde à l'écran pour une image : niveau de l'atlas, échelle, coin haut gauche.
 #[derive(Debug, Clone, Copy)]
 pub struct View {
@@ -50,9 +59,14 @@ impl View {
         let [x, y] = project(point, self.zoom);
         [(x - self.origin[0]) * self.scale, (y - self.origin[1]) * self.scale]
     }
+}
 
-    /// Zoom effectif de l'image, pour les tailles qui en dépendent (`byZoom`).
-    pub fn camera_zoom(&self) -> f64 {
+impl Projection for View {
+    fn screen_point(&self, point: LonLat) -> Option<[f64; 2]> {
+        Some(self.to_screen(point))
+    }
+
+    fn camera_zoom(&self) -> f64 {
         self.zoom + self.scale.log2()
     }
 }

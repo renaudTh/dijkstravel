@@ -5,7 +5,7 @@ use skia_safe::{Canvas, Color, Contains, Paint, Point, Rect};
 
 use crate::color::parse_color;
 use crate::geo::LonLat;
-use crate::mercator::View;
+use crate::mercator::Projection;
 use crate::model::{Theme, Tour};
 use crate::route::zoom_ratio;
 use crate::sprites::{Fonts, Label};
@@ -39,7 +39,13 @@ pub struct Markers {
 
 impl Markers {
     /// `view_at` : la vue de la caméra quand la tête est à `meters` ; `width` : largeur de l'image.
-    pub fn new(tour: &Tour, theme: &Theme, fonts: &Fonts, view_at: impl Fn(f64) -> View, width: f32) -> Self {
+    pub fn new<P: Projection>(
+        tour: &Tour,
+        theme: &Theme,
+        fonts: &Fonts,
+        view_at: impl Fn(f64) -> P,
+        width: f32,
+    ) -> Self {
         let radius = (theme.stops.marker_label_size * RADIUS_PER_LABEL) as f32;
         let text = parse_color(&theme.hud.text_color);
         let halo = parse_color(&theme.hud.background);
@@ -64,8 +70,10 @@ impl Markers {
                 let left = label.as_ref().is_some_and(|label| {
                     let view = view_at(marker.meters);
                     let ratio = zoom_ratio(view.camera_zoom()) as f32;
-                    let x = view.to_screen(marker.at)[0] as f32;
-                    x + label_offset(label, radius * ratio) + label.width > width
+                    let Some([x, _]) = view.screen_point(marker.at) else {
+                        return false;
+                    };
+                    x as f32 + label_offset(label, radius * ratio) + label.width > width
                 });
                 Marker {
                     at: marker.at,
@@ -82,7 +90,15 @@ impl Markers {
     }
 
     /// `pop_meters` : distance sur laquelle un repère atteint grossit avant de revenir à sa taille.
-    pub fn draw(&self, canvas: &Canvas, view: &View, screen: Rect, meters: f64, pop_meters: f64, label_opacity: f32) {
+    pub fn draw(
+        &self,
+        canvas: &Canvas,
+        view: &dyn Projection,
+        screen: Rect,
+        meters: f64,
+        pop_meters: f64,
+        label_opacity: f32,
+    ) {
         let ratio = zoom_ratio(view.camera_zoom()) as f32;
         let margin = screen.with_outset((300.0, 300.0));
         let mut placed: Vec<Rect> = Vec::new();
@@ -92,7 +108,9 @@ impl Markers {
             }
             let [from, to] = marker.fade;
             let opacity = 1.0 - smoothstep(((meters - from) / (to - from)).clamp(0.0, 1.0));
-            let [x, y] = view.to_screen(marker.at);
+            let Some([x, y]) = view.screen_point(marker.at) else {
+                continue;
+            };
             let point = Point::new(x as f32, y as f32);
             if opacity <= 0.0 || !margin.contains(point) {
                 continue;

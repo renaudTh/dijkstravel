@@ -6,7 +6,7 @@ use skia_safe::{Canvas, Color, Color4f, Contains, Image, Paint, Point, Rect, Til
 
 use crate::color::parse_color;
 use crate::geo::LonLat;
-use crate::mercator::View;
+use crate::mercator::Projection;
 use crate::model::{StopsTheme, Theme};
 use crate::route::{draw_icon, zoom_ratio};
 use crate::sprites::{Fonts, Label, place_image};
@@ -97,7 +97,7 @@ impl Stops {
         self.own_colors.get(index).copied().flatten()
     }
 
-    pub fn draw(&self, canvas: &Canvas, view: &View, screen: Rect, frame: &StopsFrame) {
+    pub fn draw(&self, canvas: &Canvas, view: &dyn Projection, screen: Rect, frame: &StopsFrame) {
         let ratio = zoom_ratio(view.camera_zoom()) as f32;
         let margin = screen.with_outset((200.0, 200.0));
         // Lieux à l'écran, avec leur état.
@@ -106,7 +106,7 @@ impl Stops {
             .iter()
             .enumerate()
             .filter_map(|(index, stop)| {
-                let [x, y] = view.to_screen(stop.at);
+                let [x, y] = view.screen_point(stop.at)?;
                 let point = Point::new(x as f32, y as f32);
                 margin.contains(point).then(|| {
                     let visited = index < frame.visited;
