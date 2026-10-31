@@ -4,33 +4,69 @@
   "theme": "rouge-noir",
   "video": {
     "format": "9:16",
-    "transitionSec": 6
+    "transitionSec": 3
   },
   "segments": [
     {
-      "run": "manifs-paris",
-      "title": "Paris · tracé de la préfecture",
-      "durationSec": 6,
+      "run": "manifs-paris-bastille-nation",
+      "title": "Paris · Bastille – Nation · autorisé par le tribunal",
+      "durationSec": 3,
       "city": "Paris",
-      "introSec": 1.5
+      "introSec": 1
     },
     {
       "run": "manifs-lyon",
       "title": "Lyon · 14 h · déclaré",
-      "durationSec": 6,
+      "durationSec": 3,
       "city": "Lyon"
     },
     {
       "run": "manifs-nice",
       "title": "Nice · 14 h · déclaré",
-      "durationSec": 6,
+      "durationSec": 3,
       "city": "Nice"
     },
     {
       "run": "manifs-montpellier",
       "title": "Montpellier · 14 h · déclaré",
-      "durationSec": 5,
-      "city": "Montpellier",
+      "durationSec": 3,
+      "city": "Montpellier"
+    },
+    {
+      "run": "manifs-bordeaux",
+      "title": "Bordeaux · 14 h · déclaré",
+      "durationSec": 3,
+      "city": "Bordeaux"
+    },
+    {
+      "run": "manifs-lille",
+      "title": "Lille · 14 h 30 · déclaré",
+      "durationSec": 3,
+      "city": "Lille"
+    },
+    {
+      "run": "manifs-toulon",
+      "title": "Toulon · 14 h · autorisé",
+      "durationSec": 3,
+      "city": "Toulon"
+    },
+    {
+      "run": "manifs-grenoble",
+      "title": "Grenoble · 14 h · déclaré",
+      "durationSec": 3,
+      "city": "Grenoble"
+    },
+    {
+      "run": "manifs-nimes",
+      "title": "Nîmes · 14 h 30 · autorisé",
+      "durationSec": 3,
+      "city": "Nîmes"
+    },
+    {
+      "run": "manifs-clermont-ferrand",
+      "title": "Clermont-Ferrand · 10 h · négocié",
+      "durationSec": 3,
+      "city": "Clermont-Ferrand",
       "outroSec": 2
     }
   ]

@@ -1,0 +1,29 @@
+{
+  "name": "manifs-bordeaux",
+  "title": "Bordeaux · 14 h · déclaré",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (déclaré par l'intersyndicale CGT-FSU-FO, non interdit par la préfecture) : place de la Bourse, allées de Tourny, place Gambetta, cours d'Albret, place de la Victoire",
+    "url": "https://www.bougerabordeaux.com/actu/news/manifestation-31-octobre-bordeaux-parcours-valide-bourse-victoire/",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": -0.584854,
+    "south": 44.826927,
+    "east": -0.56591,
+    "north": 44.848141
+  },
+  "start": {
+    "place": "manifs-bordeaux-0"
+  },
+  "mode": "ordered",
+  "profile": "cortege",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

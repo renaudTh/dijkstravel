@@ -1,0 +1,29 @@
+{
+  "name": "manifs-toulon",
+  "title": "Toulon · 14 h · autorisé",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (cortège CGT-FSU-Solidaires accepté par la préfecture) : Bourse du Travail, Palais de justice, avenue de la République, avenue Franklin-Roosevelt, boulevard Pierre-Toesca, avenue de l'Amiral-Collet, place Martin-Bidouré",
+    "url": "https://www.ici.fr/provence-alpes-cote-d-azur/var-83/toulon/manifestation-du-31-octobre-a-toulon-un-parcours-accepte-mais-pas-de-bus-mistral-et-un-couvre-feu-impose-3751070",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 5.911476,
+    "south": 43.11394,
+    "east": 5.940634,
+    "north": 43.13331
+  },
+  "start": {
+    "place": "manifs-toulon-0"
+  },
+  "mode": "ordered",
+  "profile": "cortege",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

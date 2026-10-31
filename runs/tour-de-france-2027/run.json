@@ -1,0 +1,30 @@
+{
+  "name": "tour-de-france-2027",
+  "title": "Tour de France 2027",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé PROVISOIRE des 21 étapes (2-25 juillet) du Tour de France 2027, reconstitué en attendant les GPX officiels : itinéraires routing.openstreetmap.de (voiture ou vélo, le plus proche du kilométrage officiel) par les villes et cols des profils officiels de letour.fr, reliées par les transferts en ligne droite",
+    "url": "https://www.cyclingstage.com/tour-de-france-2027-route/",
+    "date": "2026-10-30",
+    "licence": "Profils © ASO ; itinéraires © contributeurs OpenStreetMap (ODbL)"
+  },
+  "bbox": {
+    "west": -3.7624,
+    "south": 42.616879999999995,
+    "east": 6.92448,
+    "north": 56.153330000000004
+  },
+  "start": {
+    "place": "tdf-2027-01-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france",
+  "video": {
+    "format": "9:16",
+    "durationSec": 114,
+    "introSec": 2,
+    "outroSec": 4,
+    "markers": false
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2027-04",
+  "title": "Tour de France 2027 · Étape 4",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé PROVISOIRE de l'étape 4 (6 juillet) du Tour de France 2027, reconstitué en attendant les GPX officiels : itinéraires routing.openstreetmap.de (voiture ou vélo, le plus proche du kilométrage officiel) par les villes et cols des profils officiels de letour.fr",
+    "url": "https://www.cyclingstage.com/tour-de-france-2027-route/",
+    "date": "2026-10-30",
+    "licence": "Profils © ASO ; itinéraires © contributeurs OpenStreetMap (ODbL)"
+  },
+  "bbox": {
+    "west": -1.97177,
+    "south": 49.42,
+    "east": -1.1936499999999999,
+    "north": 49.76135
+  },
+  "start": {
+    "place": "tdf-2027-04-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france-etape",
+  "video": {
+    "format": "9:16",
+    "durationSec": 30,
+    "introSec": 2,
+    "outroSec": 3
+  }
+}

@@ -24,6 +24,7 @@
     "format": "9:16",
     "durationSec": 114,
     "introSec": 2,
-    "outroSec": 4
+    "outroSec": 4,
+    "markers": false
   }
 }

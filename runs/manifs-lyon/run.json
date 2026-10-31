@@ -17,8 +17,8 @@
   "start": {
     "place": "manifs-lyon-0"
   },
-  "mode": "open",
-  "profile": "car",
+  "mode": "ordered",
+  "profile": "cortege",
   "theme": "rouge-noir",
   "video": {
     "format": "9:16",

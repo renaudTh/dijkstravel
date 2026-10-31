@@ -1,0 +1,29 @@
+{
+  "name": "manifs-lille",
+  "title": "Lille · 14 h 30 · déclaré",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (allongé dans le sud de la ville à la demande de la préfecture)",
+    "url": "https://france3-regions.franceinfo.fr/hauts-de-france/nord-0/lille/manifestations-du-31-octobre-parcours-horaire-sitting-a-quoi-s-attendre-dans-le-nord-et-le-pas-de-calais-3441504.html",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 3.0396,
+    "south": 50.618226,
+    "east": 3.071814,
+    "north": 50.636619
+  },
+  "start": {
+    "place": "manifs-lille-0"
+  },
+  "mode": "ordered",
+  "profile": "cortege",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

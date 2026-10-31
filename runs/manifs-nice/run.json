@@ -17,8 +17,8 @@
   "start": {
     "place": "manifs-nice-0"
   },
-  "mode": "loop",
-  "profile": "car",
+  "mode": "ordered",
+  "profile": "cortege",
   "theme": "rouge-noir",
   "video": {
     "format": "9:16",

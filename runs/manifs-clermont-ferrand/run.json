@@ -1,0 +1,29 @@
+{
+  "name": "manifs-clermont-ferrand",
+  "title": "Clermont-Ferrand · 10 h · négocié",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (négocié avec la préfecture, sans passer par la place de Jaude interdite)",
+    "url": "https://france3-regions.franceinfo.fr/auvergne-rhone-alpes/puy-de-dome/clermont-ferrand/manifestation-du-31-octobre-a-clermont-ferrand-parcours-devie-heure-revendications-a-quoi-faut-il-s-attendre-3441333.html",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 3.078172,
+    "south": 45.766893,
+    "east": 3.095269,
+    "north": 45.784562
+  },
+  "start": {
+    "place": "manifs-clermont-ferrand-0"
+  },
+  "mode": "ordered",
+  "profile": "cortege",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

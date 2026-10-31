@@ -1,0 +1,29 @@
+{
+  "name": "manifs-nimes",
+  "title": "Nîmes · 14 h 30 · autorisé",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (autorisé par la préfecture du Gard, modifié pour éviter l'Écusson)",
+    "url": "https://www.ici.fr/occitanie/gard-30/mobilisation-du-31-octobre-manifestation-autorisee-a-nimes-le-cortege-passera-par-le-boulevard-victor-hugo-6827763",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 4.3477,
+    "south": 43.829619,
+    "east": 4.368545,
+    "north": 43.8433
+  },
+  "start": {
+    "place": "manifs-nimes-0"
+  },
+  "mode": "ordered",
+  "profile": "cortege",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

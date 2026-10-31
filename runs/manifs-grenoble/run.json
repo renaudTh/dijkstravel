@@ -1,0 +1,29 @@
+{
+  "name": "manifs-grenoble",
+  "title": "Grenoble · 14 h · déclaré",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours relevé dans la presse (codéclaré par Sud, même itinéraire que le 24 octobre, hors de l'hypercentre interdit)",
+    "url": "https://www.placegrenet.fr/2026/10/29/on-ne-lache-rien-les-gilets-jaunes-appellent-a-un-acte-iii-de-la-mobilisation-samedi-31-octobre-a-grenoble/692800",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 5.710927,
+    "south": 45.176789,
+    "east": 5.740671,
+    "north": 45.194246
+  },
+  "start": {
+    "place": "manifs-grenoble-0"
+  },
+  "mode": "ordered",
+  "profile": "cortege",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

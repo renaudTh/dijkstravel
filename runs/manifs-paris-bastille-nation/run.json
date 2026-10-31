@@ -1,0 +1,29 @@
+{
+  "name": "manifs-paris-bastille-nation",
+  "title": "Paris · Bastille – Nation · autorisé par le tribunal",
+  "source": {
+    "kind": "manuel",
+    "description": "Parcours déclaré par l'intersyndicale, interdit par la préfecture de police puis autorisé par le tribunal administratif le 30 octobre ; appel devant le Conseil d'État. Rues intermédiaires non publiées",
+    "url": "https://france3-regions.franceinfo.fr/paris-ile-de-france/manifestation-du-31-octobre-a-paris-parcours-declares-interdictions-dispositif-de-securite-ce-que-l-on-sait-sur-la-mobilisation-contre-la-vie-chere-3441171.html",
+    "date": "2026-10-30",
+    "licence": "CC0"
+  },
+  "bbox": {
+    "west": 2.365183,
+    "south": 48.844415,
+    "east": 2.399853,
+    "north": 48.857226
+  },
+  "start": {
+    "place": "manifs-paris-bastille-nation-0"
+  },
+  "mode": "ordered",
+  "profile": "cortege",
+  "theme": "rouge-noir",
+  "video": {
+    "format": "9:16",
+    "durationSec": 6,
+    "introSec": 1,
+    "outroSec": 1
+  }
+}

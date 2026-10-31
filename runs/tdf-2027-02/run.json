@@ -1,0 +1,29 @@
+{
+  "name": "tdf-2027-02",
+  "title": "Tour de France 2027 · Étape 2",
+  "source": {
+    "kind": "manuel",
+    "description": "Tracé PROVISOIRE de l'étape 2 (3 juillet) du Tour de France 2027, reconstitué en attendant les GPX officiels : itinéraires routing.openstreetmap.de (voiture ou vélo, le plus proche du kilométrage officiel) par les villes et cols des profils officiels de letour.fr",
+    "url": "https://www.cyclingstage.com/tour-de-france-2027-route/",
+    "date": "2026-10-30",
+    "licence": "Profils © ASO ; itinéraires © contributeurs OpenStreetMap (ODbL)"
+  },
+  "bbox": {
+    "west": -3.1909199999999998,
+    "south": 53.34326,
+    "east": -2.3390400000000002,
+    "north": 54.65215
+  },
+  "start": {
+    "place": "tdf-2027-02-depart"
+  },
+  "mode": "open",
+  "profile": "car",
+  "theme": "tour-de-france-etape",
+  "video": {
+    "format": "9:16",
+    "durationSec": 30,
+    "introSec": 2,
+    "outroSec": 3
+  }
+}
