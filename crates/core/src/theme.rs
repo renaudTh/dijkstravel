@@ -71,6 +71,8 @@ pub struct StopsTheme {
     /// Nom du lieu écrit sur la carte dès qu'il est atteint, sauf s'il en chevaucherait un autre.
     pub show_labels: bool,
     pub label_size: f64,
+    /// Nom des villes et villages traversés, sur la carte au passage de la tête.
+    pub show_localities: bool,
     /// Noms des sprints et ascensions (`Tour::markers`), en pixels ; leur point grandit avec.
     pub marker_label_size: f64,
 }
@@ -214,6 +216,7 @@ impl Default for Theme {
                 image_size: 70.0,
                 show_labels: false,
                 label_size: 28.0,
+                show_localities: false,
                 marker_label_size: 21.0,
             },
             basemap: BasemapTheme {
@@ -363,6 +366,7 @@ impl Theme {
                 image_size: r.number("stops.imageSize", d.stops.image_size),
                 show_labels: r.flag("stops.showLabels", d.stops.show_labels),
                 label_size: r.number("stops.labelSize", d.stops.label_size),
+                show_localities: r.flag("stops.showLocalities", d.stops.show_localities),
                 marker_label_size: r.number("stops.markerLabelSize", d.stops.marker_label_size),
             },
             basemap: BasemapTheme {

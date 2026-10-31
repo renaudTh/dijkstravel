@@ -227,6 +227,11 @@ impl Animation {
         travel_zoom(self.overview, self.follow_fraction)
     }
 
+    /// Mètres au sol sur le petit côté de l'écran pendant le parcours.
+    pub fn screen_meters(&self) -> f64 {
+        visible_meters(self.overview, self.travel_zoom())
+    }
+
     /// Le centre suit une moyenne glissante du tracé, pas la tête elle-même ; à plat nord en haut, incliné
     /// face au cap lissé du tracé.
     fn travel_camera(&self, meters: f64) -> Camera {

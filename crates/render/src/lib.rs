@@ -13,6 +13,7 @@ pub mod gpu;
 pub mod hillshade;
 pub mod hud;
 pub mod infra;
+pub mod localities;
 pub mod markers;
 pub mod mercator;
 pub mod mesh;

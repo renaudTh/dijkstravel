@@ -98,6 +98,7 @@ const GROUPS: readonly { readonly title: string; readonly fields: readonly Field
       { kind: 'checkbox', path: 'stops.showImageOnMap', label: 'Image du lieu (blason…) sur la carte' },
       { kind: 'range', path: 'stops.imageSize', label: "Taille de l'image sur la carte (px)", step: 1 },
       { kind: 'checkbox', path: 'stops.showLabels', label: 'Nom des lieux atteints sur la carte' },
+      { kind: 'checkbox', path: 'stops.showLocalities', label: 'Nom des localités traversées' },
       { kind: 'range', path: 'stops.labelSize', label: 'Taille des noms (px)', step: 1 },
       { kind: 'range', path: 'stops.markerLabelSize', label: 'Taille des sprints et ascensions (px)', step: 1 },
     ],

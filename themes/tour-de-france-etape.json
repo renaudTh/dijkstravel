@@ -16,6 +16,7 @@
     "popRadius": 10,
     "icon": "",
     "showLabels": true,
+    "showLocalities": true,
     "labelSize": 30,
     "markerLabelSize": 36,
     "startColor": "#1e6fff",

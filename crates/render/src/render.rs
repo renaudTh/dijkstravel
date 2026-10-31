@@ -8,8 +8,10 @@ pub use skia_safe::Image;
 use skia_safe::{Canvas, EncodedImageFormat, Rect, Surface, surfaces};
 
 use crate::atlas::Atlas;
+use crate::color::parse_color;
 use crate::frame::{Animation, Camera, Moment};
 use crate::hud::{Hud, HudFrame, Profile};
+use crate::localities::Localities;
 use crate::markers::Markers;
 use crate::mercator::Projection;
 use crate::model::{Input, Tour, Video};
@@ -25,6 +27,8 @@ const LABEL_FADE_PROGRESS: f64 = 0.5;
 /// Points du profil d'altitude, et zoom du relief qu'il lit (≈ 40 m par pixel).
 const PROFILE_SAMPLES: usize = 400;
 const PROFILE_ZOOM: u8 = 11;
+/// Taille du nom d'une localité traversée, en part de celle des repères : plus discret qu'eux.
+const LOCALITY_LABEL_SHARE: f64 = 0.75;
 
 /// Ce que la vidéo lit d'un rendu : un run seul (`Renderer`) ou plusieurs à la suite (`Montage`).
 pub trait Frames: Sync {
@@ -63,6 +67,9 @@ pub struct Renderer {
     /// Profil d'altitude de la carte d'infos (`hud.showProfile`), lu à la première image : ses tuiles
     /// sont téléchargées avant.
     profile: OnceLock<Option<Profile>>,
+    /// Localités traversées (`stops.showLocalities`), lues à la première image : leurs tuiles sont
+    /// téléchargées avant.
+    localities: OnceLock<Option<Localities>>,
     route: Route,
     stops: Stops,
     markers: Markers,
@@ -137,6 +144,7 @@ impl Renderer {
             transfer_atlas,
             terrain,
             profile: OnceLock::new(),
+            localities: OnceLock::new(),
             animation,
             fade_labels_at_outro: true,
             tour,
@@ -227,6 +235,29 @@ impl Renderer {
             .as_ref()
     }
 
+    fn localities(&self) -> Option<&Localities> {
+        self.localities
+            .get_or_init(|| {
+                let theme = &self.input.theme;
+                theme.stops.show_localities.then(|| {
+                    let colors = [parse_color(&theme.hud.text_color), parse_color(&theme.hud.background)];
+                    let size = (theme.stops.marker_label_size * LOCALITY_LABEL_SHARE) as f32;
+                    let screen = self.animation.screen_meters();
+                    let (dir, source) = (&self.input.tile_dir, &self.input.vector.name);
+                    Localities::new(dir, source, &self.tour, &Fonts::new(), size, colors, screen)
+                })
+            })
+            .as_ref()
+    }
+
+    /// Tuiles des localités traversées, si elles sont affichées.
+    fn locality_tiles(&self) -> BTreeSet<String> {
+        if !self.input.theme.stops.show_localities {
+            return BTreeSet::new();
+        }
+        crate::localities::tiles(&self.tour.path, &self.input.vector.name)
+    }
+
     /// Tuiles de relief du profil d'altitude, s'il est affiché.
     fn profile_tiles(&self) -> BTreeSet<String> {
         if !self.input.theme.hud.show_profile {
@@ -256,6 +287,7 @@ impl Frames for Renderer {
         if let Some(terrain) = &self.terrain {
             let mut tiles = self.needed_tiles_3d(terrain, frames);
             tiles.extend(self.profile_tiles());
+            tiles.extend(self.locality_tiles());
             tiles.sort();
             tiles.dedup();
             return tiles;
@@ -278,6 +310,7 @@ impl Frames for Renderer {
             tiles.extend(transfer_chunks.into_iter().flat_map(|chunk| transfer.tiles_of(chunk)));
         }
         tiles.extend(self.profile_tiles());
+        tiles.extend(self.locality_tiles());
         tiles.into_iter().collect()
     }
 
@@ -327,6 +360,9 @@ impl Renderer {
             Moment::Outro { progress } if self.fade_labels_at_outro => (1.0 - progress / LABEL_FADE_PROGRESS).max(0.0),
             _ => 1.0,
         };
+        if let Some(localities) = self.localities().filter(|_| matches!(moment, Moment::Travel { .. })) {
+            localities.draw(canvas, view, screen, meters, label_opacity as f32);
+        }
         self.markers.draw(canvas, view, screen, meters, pop_meters, label_opacity as f32);
         let stops_frame = StopsFrame { visited: hud.visited, meters, pop_meters, label_opacity: label_opacity as f32 };
         self.stops.draw(canvas, view, screen, &stops_frame);
