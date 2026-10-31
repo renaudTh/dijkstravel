@@ -19,6 +19,8 @@ const ATTEMPTS: u32 = 6;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 /// Requêtes simultanées vers les fournisseurs : EOX coupe des connexions au-delà de quelques dizaines.
 const CONCURRENCY: usize = 8;
+/// Imageries qui couvrent le monde entier, mer comprise : une tuile n'y manque jamais vraiment.
+const WORLDWIDE_IMAGERIES: [&str; 2] = ["nasa", "sentinel"];
 /// Pause avant de retenter les tuiles restées injoignables : le temps qu'un fournisseur nous relâche.
 const SECOND_PASS_DELAY: Duration = Duration::from_secs(20);
 /// Graisses de la carte d'infos : titre (700), texte (800), distance (900).
@@ -134,7 +136,9 @@ impl Downloader {
     }
 
     /// `Ok(None)` : la ressource n'existe pas ; `Err` : toujours injoignable après `ATTEMPTS` essais.
-    fn get_with_retries(&self, url: &str) -> Result<Option<Vec<u8>>, String> {
+    /// `worldwide` : une 4xx n'y veut pas dire « hors couverture » mais un refus passager (Sentinel-2 en
+    /// rafale, l'Écosse restée noire), retenté comme une 5xx.
+    fn get_with_retries(&self, url: &str, worldwide: bool) -> Result<Option<Vec<u8>>, String> {
         let mut reason = String::new();
         for attempt in 0..ATTEMPTS {
             if attempt > 0 {
@@ -142,7 +146,7 @@ impl Downloader {
             }
             match self.get(url, &[]) {
                 Ok(body) => return Ok(Some(body)),
-                Err(Failure { retry: false, .. }) => return Ok(None),
+                Err(Failure { retry: false, .. }) if !worldwide => return Ok(None),
                 Err(Failure { reason: last, .. }) => reason = last,
             }
         }
@@ -239,7 +243,7 @@ impl Downloader {
         let parts: Vec<&str> = tile.split('/').collect();
         let [source, z, x, y] = parts.as_slice() else { return Err(format!("Tuile mal formée : {tile}")) };
         let url = self.template(source)?.replace("{z}", z).replace("{x}", x).replace("{y}", y);
-        match self.get_with_retries(&url) {
+        match self.get_with_retries(&url, WORLDWIDE_IMAGERIES.contains(source)) {
             Ok(Some(body)) => write_atomically(&dir.join(tile), &body).map(Ok),
             Ok(None) => Ok(Ok(())),
             Err(reason) => Ok(Err(reason)),
