@@ -89,6 +89,7 @@ impl Scene {
         frames: std::ops::Range<u32>,
         monitor: &dyn Monitor,
     ) -> Result<(), String> {
+        self.downloader.fetch_tiles(&renderer.camera_tiles(), monitor)?;
         self.downloader.fetch_tiles(&renderer.needed_tiles(frames), monitor)
     }
 

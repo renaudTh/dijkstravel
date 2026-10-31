@@ -86,8 +86,9 @@ impl Terrain3d {
         self.meshes.tile_zoom(atlas.level_for(camera.zoom))
     }
 
-    pub fn perspective(&self, atlas: &Atlas, camera: Camera, width: u32, height: u32) -> Perspective {
-        let ground = self.elevation.altitude_at(camera.center, self.tile_zoom(atlas, camera));
+    /// La caméra au-dessus du relief moyenné autour du point visé (`sight::ground`).
+    pub fn perspective(&self, camera: Camera, width: u32, height: u32) -> Perspective {
+        let ground = crate::sight::ground(&self.elevation, camera, [width, height]);
         Perspective::new(camera, width, height, ground, self.exaggeration)
     }
 

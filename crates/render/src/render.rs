@@ -34,6 +34,10 @@ const LOCALITY_LABEL_SHARE: f64 = 0.75;
 pub trait Frames: Sync {
     fn video(&self) -> &Video;
     fn frame_count(&self) -> u32;
+    /// Tuiles à télécharger avant `needed_tiles`, qui les lit pour placer la caméra.
+    fn camera_tiles(&self) -> Vec<String> {
+        Vec::new()
+    }
     /// Toutes les tuiles que liront les images `frames`, `<source>/<z>/<x>/<y>`.
     fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String>;
     /// Dessine l'image `frame` sur `canvas`, qu'elle recouvre entièrement.
@@ -154,10 +158,12 @@ impl Renderer {
 
     /// Caméra de la première image (début de l'intro) et de la dernière (fin de l'outro).
     pub fn first_camera(&self) -> Camera {
+        self.hold_pitches();
         self.animation.camera_at(self.animation.moment_at(0))
     }
 
     pub fn last_camera(&self) -> Camera {
+        self.hold_pitches();
         self.animation.camera_at(self.animation.moment_at(self.frame_count().saturating_sub(1)))
     }
 
@@ -250,6 +256,17 @@ impl Renderer {
             .as_ref()
     }
 
+    /// En relief, redresse la caméra là où le relief cacherait la tête (`sight`), une fois ses tuiles
+    /// (`camera_tiles`) téléchargées.
+    fn hold_pitches(&self) {
+        if self.terrain.is_some() {
+            let size = [self.input.video.width, self.input.video.height];
+            let exaggeration = self.input.theme.camera.terrain_exaggeration;
+            let elevation = self.atlas.elevation();
+            self.animation.hold_pitches(|| crate::sight::limits(&self.animation, &elevation, size, exaggeration));
+        }
+    }
+
     /// Tuiles des localités traversées, si elles sont affichées.
     fn locality_tiles(&self) -> BTreeSet<String> {
         if !self.input.theme.stops.show_localities {
@@ -282,9 +299,19 @@ impl Frames for Renderer {
         self.animation.timeline.frame_count()
     }
 
+    fn camera_tiles(&self) -> Vec<String> {
+        if self.terrain.is_none() {
+            return Vec::new();
+        }
+        let size = [self.input.video.width, self.input.video.height];
+        let exaggeration = self.input.theme.camera.terrain_exaggeration;
+        crate::sight::tiles(&self.animation, &self.atlas.elevation(), size, exaggeration).into_iter().collect()
+    }
+
     fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String> {
         let (width, height) = (self.input.video.width, self.input.video.height);
         if let Some(terrain) = &self.terrain {
+            self.hold_pitches();
             let mut tiles = self.needed_tiles_3d(terrain, frames);
             tiles.extend(self.profile_tiles());
             tiles.extend(self.locality_tiles());
@@ -321,7 +348,8 @@ impl Frames for Renderer {
         let meters = self.animation.meters_of(moment);
         let blend = self.animation.transfer_blend(meters);
         if let Some(terrain) = &self.terrain {
-            let perspective = terrain.perspective(&self.atlas, camera, width, height);
+            self.hold_pitches();
+            let perspective = terrain.perspective(camera, width, height);
             let transfer = self.transfer_atlas.as_ref().map(|transfer| (transfer, blend));
             let rendered = terrain.render(&self.atlas, transfer, &perspective);
             canvas.draw_image(&rendered.image, (0, 0), None);

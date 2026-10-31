@@ -145,6 +145,12 @@ impl Frames for Montage {
         self.starts[last] + self.parts[last].frame_count()
     }
 
+    fn camera_tiles(&self) -> Vec<String> {
+        let tiles: std::collections::BTreeSet<String> =
+            self.parts.iter().flat_map(|part| part.camera_tiles()).collect();
+        tiles.into_iter().collect()
+    }
+
     fn needed_tiles(&self, frames: std::ops::Range<u32>) -> Vec<String> {
         let mut tiles = std::collections::BTreeSet::new();
         for (index, (part, &start)) in self.parts.iter().zip(&self.starts).enumerate() {

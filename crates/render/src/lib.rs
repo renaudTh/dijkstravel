@@ -25,6 +25,7 @@ pub mod preview;
 pub mod render;
 pub mod route;
 pub mod scene;
+pub mod sight;
 pub mod sprites;
 pub mod stops;
 pub mod terrain3d;

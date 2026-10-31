@@ -1,6 +1,6 @@
 //! Phases, caméra et carte d'infos de chaque image : elles ne dépendent que de son numéro.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::geo::{LonLat, MeasuredPath};
 use crate::mercator::project;
@@ -87,6 +87,11 @@ const HEADING_BEHIND: f64 = 0.5;
 const STRAIGHTNESS: [f64; 2] = [0.3, 0.6];
 /// Rotation la plus rapide de la caméra, en degrés par seconde de vidéo.
 const MAX_TURN_PER_SECOND: f64 = 20.0;
+/// L'inclinaison change d'au plus tant de degrés par seconde quand le relief l'oblige à se redresser.
+const MAX_PITCH_PER_SECOND: f64 = 6.0;
+/// Le plafond d'inclinaison d'une image vaut pour tant de secondes autour d'elle : la caméra se redresse
+/// avant que le relief ne cache la tête et reste redressée sans à-coups entre deux obstacles proches.
+const PITCH_HOLD_SECONDS: f64 = 1.5;
 
 fn progress_of(index: u32, count: u32) -> f64 {
     if count <= 1 { 1.0 } else { (f64::from(index) / f64::from(count - 1)).min(1.0) }
@@ -112,6 +117,10 @@ pub struct Animation {
     pitch: f64,
     /// Cap de la caméra inclinée le long du tracé ; absent à plat.
     headings: Option<Headings>,
+    /// Inclinaison de chaque image du parcours, redressée là où le relief cacherait la tête
+    /// (`hold_pitches`) ; sans elle, celle du thème partout.
+    pitches: OnceLock<PerFrame>,
+    fps: f64,
 }
 
 impl Animation {
@@ -137,10 +146,11 @@ impl Animation {
             transfer_meters,
             pitch: camera.pitch,
             headings: None,
+            pitches: OnceLock::new(),
+            fps: f64::from(video.fps.max(1)),
         };
         if camera.pitch > 0.0 {
-            let travel = animation.timeline.travel;
-            let frames: Vec<f64> = (0..travel).map(|frame| animation.meters_at(progress_of(frame, travel))).collect();
+            let frames = animation.travel_meters();
             let max_turn = MAX_TURN_PER_SECOND / f64::from(video.fps.max(1));
             let course = Course::new(&animation.tour.path, camera.heading_window * screen);
             animation.headings = Some(Headings::new(&course, frames, max_turn));
@@ -232,6 +242,57 @@ impl Animation {
         visible_meters(self.overview, self.travel_zoom())
     }
 
+    /// Inclinaison du parcours dans le thème, en degrés.
+    pub fn pitch(&self) -> f64 {
+        self.pitch
+    }
+
+    /// Distance parcourue à chaque image du parcours.
+    pub fn travel_meters(&self) -> Vec<f64> {
+        let travel = self.timeline.travel;
+        (0..travel).map(|frame| self.meters_at(progress_of(frame, travel))).collect()
+    }
+
+    /// La caméra du parcours à `meters`, à l'inclinaison `pitch`.
+    pub fn tilted_camera(&self, meters: f64, pitch: f64) -> Camera {
+        Camera { pitch, ..self.travel_camera(meters) }
+    }
+
+    /// Plafonne l'inclinaison de chaque image du parcours (`limits`, une par image de `travel_meters`),
+    /// une fois pour toutes : `limits` n'est appelé que la première fois. La caméra reste sous chaque plafond un peu
+    /// avant et après son image, et ne tourne jamais plus vite que `MAX_PITCH_PER_SECOND`.
+    pub fn hold_pitches(&self, limits: impl FnOnce() -> Vec<f64>) {
+        self.pitches.get_or_init(|| {
+            let limits = limits();
+            let hold = (PITCH_HOLD_SECONDS * self.fps).round() as usize;
+            let floor: Vec<f64> = (0..limits.len())
+                .map(|i| {
+                    limits[i.saturating_sub(hold)..(i + hold + 1).min(limits.len())]
+                        .iter()
+                        .copied()
+                        .fold(self.pitch, f64::min)
+                })
+                .collect();
+            let step = MAX_PITCH_PER_SECOND / self.fps;
+            let mut held = floor.clone();
+            for i in 1..held.len() {
+                held[i] = held[i].min(held[i - 1] + step);
+            }
+            for i in (0..held.len().saturating_sub(1)).rev() {
+                held[i] = held[i].min(held[i + 1] + step);
+            }
+            // Moyenne glissante : chaque valeur moyennée est sous le plancher de toutes les images à moins
+            // de `hold`, donc sous le plafond de l'image.
+            let values = (0..held.len())
+                .map(|i| {
+                    let window = &held[i.saturating_sub(hold)..(i + hold + 1).min(held.len())];
+                    window.iter().sum::<f64>() / window.len() as f64
+                })
+                .collect();
+            PerFrame { meters: self.travel_meters(), values }
+        });
+    }
+
     /// Le centre suit une moyenne glissante du tracé, pas la tête elle-même ; à plat nord en haut, incliné
     /// face au cap lissé du tracé.
     fn travel_camera(&self, meters: f64) -> Camera {
@@ -246,7 +307,10 @@ impl Animation {
         let count = SMOOTHING_SAMPLES as f64;
         let center = [sum[0] / count, sum[1] / count];
         match &self.headings {
-            Some(headings) => Camera { center, zoom, pitch: self.pitch, bearing: headings.at(meters) },
+            Some(headings) => {
+                let pitch = self.pitches.get().map_or(self.pitch, |pitches| pitches.at(meters));
+                Camera { center, zoom, pitch, bearing: headings.at(meters) }
+            }
             None => Camera::flat(center, zoom),
         }
     }
@@ -321,10 +385,8 @@ impl Course {
 /// d'une image à l'autre. Calculé une fois pour toutes les images, il se lit par la distance parcourue,
 /// les images se rendant dans le désordre.
 struct Headings {
-    /// Distance parcourue à chaque image du parcours, croissante.
-    meters: Vec<f64>,
     /// Degrés, dans le sens horaire depuis le nord, déroulés.
-    bearings: Vec<f64>,
+    bearings: PerFrame,
 }
 
 impl Headings {
@@ -346,23 +408,36 @@ impl Headings {
         let forward = clamp(&mut target.iter());
         let mut backward = clamp(&mut target.iter().rev());
         backward.reverse();
-        let bearings = forward.iter().zip(&backward).map(|(a, b)| (a + b) / 2.0).collect();
-        Headings { meters, bearings }
+        let values = forward.iter().zip(&backward).map(|(a, b)| (a + b) / 2.0).collect();
+        Headings { bearings: PerFrame { meters, values } }
     }
 
     fn at(&self, meters: f64) -> f64 {
-        let Some(&last) = self.bearings.last() else { return 0.0 };
+        self.bearings.at(meters).rem_euclid(360.0)
+    }
+}
+
+/// Une valeur par image du parcours, lue par la distance parcourue : les images se rendent dans le
+/// désordre.
+struct PerFrame {
+    /// Distance parcourue à chaque image du parcours, croissante.
+    meters: Vec<f64>,
+    values: Vec<f64>,
+}
+
+impl PerFrame {
+    fn at(&self, meters: f64) -> f64 {
+        let Some(&last) = self.values.last() else { return 0.0 };
         let i = self.meters.partition_point(|&m| m <= meters);
-        let bearing = match i {
-            0 => self.bearings[0],
+        match i {
+            0 => self.values[0],
             i if i >= self.meters.len() => last,
             i => {
                 let (m0, m1) = (self.meters[i - 1], self.meters[i]);
                 let t = if m1 > m0 { (meters - m0) / (m1 - m0) } else { 0.0 };
-                lerp(self.bearings[i - 1], self.bearings[i], t)
+                lerp(self.values[i - 1], self.values[i], t)
             }
-        };
-        bearing.rem_euclid(360.0)
+        }
     }
 }
 

@@ -218,7 +218,7 @@ impl Perspective {
     }
 
     /// Point du plan z = 0 sous le pixel, si le rayon y descend.
-    fn ground_hit(&self, pixel: [f64; 2]) -> Option<DVec3> {
+    pub(crate) fn ground_hit(&self, pixel: [f64; 2]) -> Option<DVec3> {
         let direction = self.ray(pixel);
         // Rayon horizontal ou montant : il ne touche jamais le sol.
         if direction.z >= -1e-9 {
@@ -228,7 +228,7 @@ impl Perspective {
         Some(self.eye + direction * t)
     }
 
-    fn to_lon_lat(&self, local: DVec3) -> LonLat {
+    pub(crate) fn to_lon_lat(&self, local: DVec3) -> LonLat {
         unproject([self.target[0] + local.x, self.target[1] - local.y], self.camera.zoom)
     }
 }
