@@ -122,6 +122,7 @@ fn check(file: &Path) {
         &fixture.video,
         &CameraTheme {
             follow_fraction: fixture.follow_fraction,
+            zoom: 1.0,
             stop_slowdown: fixture.slowdown,
             marker_slowdown: 0.0,
             even_stages: 0.0,

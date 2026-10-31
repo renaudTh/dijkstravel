@@ -108,6 +108,8 @@ pub struct Animation {
     pub tour: Arc<Tour>,
     pub timeline: Timeline,
     follow_fraction: f64,
+    /// `camera.zoom` : resserre le cadrage, pas le lissage.
+    zoom: f64,
     total: f64,
     pace: Option<Pace>,
     overview: Camera,
@@ -128,6 +130,7 @@ impl Animation {
         let follow_fraction = camera.follow_fraction;
         let total = tour.path.total_meters();
         let overview = overview(&tour);
+        // Lissage et zones à l'échelle de l'écran sans `camera.zoom` : zoomer ne rend pas la caméra plus nerveuse.
         let screen = visible_meters(overview, travel_zoom(overview, follow_fraction));
         let zones = Zones { transfer: TRANSFER_SCREENS * screen, marker: MARKER_SCREENS * screen };
         let paced = camera.stop_slowdown != 0.0
@@ -140,6 +143,7 @@ impl Animation {
             tour,
             timeline: Timeline::new(video),
             follow_fraction,
+            zoom: camera.zoom.max(f64::MIN_POSITIVE),
             total,
             pace,
             overview,
@@ -234,7 +238,12 @@ impl Animation {
 
     /// Zoom de tout le parcours : il ne dépend pas de la position.
     pub fn travel_zoom(&self) -> f64 {
-        travel_zoom(self.overview, self.follow_fraction)
+        (travel_zoom(self.overview, self.follow_fraction) + self.zoom.log2()).clamp(4.0, 16.0)
+    }
+
+    /// Mètres au sol sur le petit côté de l'écran sans `camera.zoom` : l'échelle du lissage de la caméra.
+    fn smoothing_meters(&self) -> f64 {
+        visible_meters(self.overview, travel_zoom(self.overview, self.follow_fraction))
     }
 
     /// Mètres au sol sur le petit côté de l'écran pendant le parcours.
@@ -297,7 +306,7 @@ impl Animation {
     /// face au cap lissé du tracé.
     fn travel_camera(&self, meters: f64) -> Camera {
         let zoom = self.travel_zoom();
-        let window = visible_meters(self.overview, zoom) * 0.5;
+        let window = self.smoothing_meters() * 0.5;
         let mut sum = [0.0, 0.0];
         for i in 0..SMOOTHING_SAMPLES {
             let offset = (2 * i) as f64 / (SMOOTHING_SAMPLES - 1) as f64 - 1.0;

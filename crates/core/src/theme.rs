@@ -128,6 +128,9 @@ pub struct HudTheme {
 pub struct CameraTheme {
     /// Part de l'emprise totale visible pendant le parcours.
     pub follow_fraction: f64,
+    /// Rapproche la caméra du parcours d'autant (1.5 : plus près), sans resserrer son lissage ni les zones
+    /// de ralenti, qui restent à l'échelle de `followFraction`.
+    pub zoom: f64,
     /// Ralentissement au passage d'un lieu, rattrapé entre les lieux (2 : trois fois plus lent) ; 0 : allure constante.
     pub stop_slowdown: f64,
     /// De même au passage d'un sprint ou d'une ascension (`Tour::markers`), sur une zone à l'échelle de l'écran.
@@ -138,7 +141,8 @@ pub struct CameraTheme {
     /// Inclinaison de la caméra pendant le parcours, en degrés : 0, carte à plat nord en haut ; au-delà,
     /// vue en relief qui suit le cap du tracé (étapes, parcours à petite échelle).
     pub pitch: f64,
-    /// Longueur de tracé sur laquelle le cap de la caméra inclinée est lissé, en écrans (petit côté) :
+    /// Longueur de tracé sur laquelle le cap de la caméra inclinée est lissé, en écrans (petit côté, sans
+    /// `zoom`) :
     /// plus grand, la caméra tourne moins dans les lacets.
     pub heading_window: f64,
     /// Exagération du relief de la vue inclinée.
@@ -156,7 +160,7 @@ pub const SEA_IMAGERIES: [&str; 4] = ["", "nasa", "ign", "sentinel"];
 pub const HUD_FONTS: [&str; 6] = ["Nunito", "Quicksand", "Fredoka", "Baloo 2", "Poppins", "Comfortaa"];
 
 /// Bornes des réglages numériques, partagées par la validation et les curseurs de l'éditeur.
-pub const NUMBER_RANGES: [(&str, f64, f64); 24] = [
+pub const NUMBER_RANGES: [(&str, f64, f64); 25] = [
     ("route.width", 2.0, 40.0),
     ("route.coreRatio", 0.0, 1.0),
     ("route.coreBlurRatio", 0.0, 1.0),
@@ -175,6 +179,7 @@ pub const NUMBER_RANGES: [(&str, f64, f64); 24] = [
     ("basemap.tintOpacity", 0.0, 0.9),
     ("hud.size", 12.0, 60.0),
     ("camera.followFraction", 0.02, 1.0),
+    ("camera.zoom", 0.25, 4.0),
     ("camera.stopSlowdown", 0.0, 5.0),
     ("camera.markerSlowdown", 0.0, 5.0),
     ("camera.evenStages", 0.0, 1.0),
@@ -251,6 +256,7 @@ impl Default for Theme {
             },
             camera: CameraTheme {
                 follow_fraction: 1.0 / 8.0,
+                zoom: 1.0,
                 stop_slowdown: 0.0,
                 marker_slowdown: 0.0,
                 even_stages: 0.0,
@@ -401,6 +407,7 @@ impl Theme {
             },
             camera: CameraTheme {
                 follow_fraction: r.number("camera.followFraction", d.camera.follow_fraction),
+                zoom: r.number("camera.zoom", d.camera.zoom),
                 stop_slowdown: r.number("camera.stopSlowdown", d.camera.stop_slowdown),
                 marker_slowdown: r.number("camera.markerSlowdown", d.camera.marker_slowdown),
                 even_stages: r.number("camera.evenStages", d.camera.even_stages),
