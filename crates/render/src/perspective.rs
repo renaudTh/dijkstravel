@@ -15,7 +15,7 @@ use crate::mercator::{Projection, project, unproject};
 /// Champ de vision vertical de MapLibre (`0.6435011087932844` rad, soit 36,87°).
 const FOV_Y: f64 = 0.643_501_108_793_284_4;
 /// Au-delà de cet angle depuis la verticale, le sol n'est plus dessiné : brouillard, puis ciel.
-const MAX_RAY_ANGLE: f64 = 78.0 * std::f64::consts::PI / 180.0;
+const MAX_RAY_ANGLE: f64 = 85.0 * std::f64::consts::PI / 180.0;
 /// Part de la distance dessinée où commence le brouillard, quand l'horizon est en vue.
 const FOG_START: f64 = 0.45;
 /// Le brouillard monte quand le haut de l'écran approche de `MAX_RAY_ANGLE` sur cet angle : à plat, aucun.
